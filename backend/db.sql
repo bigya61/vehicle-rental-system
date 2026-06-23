@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS vehicles (
   year INT DEFAULT NULL,
   price_per_day DECIMAL(8,2) DEFAULT 0.00,
   image VARCHAR(255) DEFAULT NULL,
+  description TEXT DEFAULT NULL,
+  status ENUM('available', 'booked') NOT NULL DEFAULT 'available',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -32,6 +34,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   email VARCHAR(255) NOT NULL,
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
+  status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL

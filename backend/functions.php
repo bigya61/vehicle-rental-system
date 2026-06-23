@@ -51,14 +51,24 @@ function vehicleImagePath(array $vehicle) {
     return $image !== '' ? $image : 'images/placeholder.svg';
 }
 
-function createVehicle(PDO $pdo, $owner_id, $make, $model, $year, $price_per_day, $image) {
-    $stmt = $pdo->prepare('INSERT INTO vehicles (owner_id, make, model, year, price_per_day, image, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())');
-    return $stmt->execute([$owner_id, $make, $model, $year ?: null, $price_per_day, $image]);
+function createVehicle(PDO $pdo, $owner_id, $make, $model, $year, $price_per_day, $image, $description = null) {
+    $stmt = $pdo->prepare('INSERT INTO vehicles (owner_id, make, model, year, price_per_day, image, description, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, \'available\', NOW())');
+    return $stmt->execute([$owner_id, $make, $model, $year ?: null, $price_per_day, $image, $description]);
 }
 
-function updateVehicle(PDO $pdo, $id, $make, $model, $year, $price_per_day, $image) {
-    $stmt = $pdo->prepare('UPDATE vehicles SET make = ?, model = ?, year = ?, price_per_day = ?, image = ? WHERE id = ?');
-    return $stmt->execute([$make, $model, $year ?: null, $price_per_day, $image, $id]);
+function updateVehicle(PDO $pdo, $id, $make, $model, $year, $price_per_day, $image, $description = null) {
+    $stmt = $pdo->prepare('UPDATE vehicles SET make = ?, model = ?, year = ?, price_per_day = ?, image = ?, description = ? WHERE id = ?');
+    return $stmt->execute([$make, $model, $year ?: null, $price_per_day, $image, $description, $id]);
+}
+
+function setVehicleStatus(PDO $pdo, $id, $status) {
+    $status = $status === 'booked' ? 'booked' : 'available';
+    $stmt = $pdo->prepare('UPDATE vehicles SET status = ? WHERE id = ?');
+    return $stmt->execute([$status, $id]);
+}
+
+function isVehicleBooked(array $vehicle): bool {
+    return ($vehicle['status'] ?? 'available') === 'booked';
 }
 
 function deleteVehicle(PDO $pdo, $id) {
@@ -91,9 +101,66 @@ function authenticateUser(PDO $pdo, $email, $password) {
     return password_verify($password, $user['password']) ? $user : false;
 }
 
+/**
+ * Books a vehicle atomically. Only succeeds if the vehicle is currently
+ * 'available'; marks it 'booked' in the same transaction to avoid double
+ * booking. Returns true on success, false if already booked / missing.
+ */
 function createBooking(PDO $pdo, $vehicle_id, $user_id, $name, $email, $start_date, $end_date) {
-    $stmt = $pdo->prepare('INSERT INTO bookings (vehicle_id, user_id, name, email, start_date, end_date, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())');
-    return $stmt->execute([$vehicle_id, $user_id ?: null, $name, $email, $start_date, $end_date]);
+    try {
+        $pdo->beginTransaction();
+
+        $lock = $pdo->prepare('SELECT status FROM vehicles WHERE id = ? FOR UPDATE');
+        $lock->execute([$vehicle_id]);
+        $status = $lock->fetchColumn();
+
+        if ($status === false || $status === 'booked') {
+            $pdo->rollBack();
+            return false;
+        }
+
+        $stmt = $pdo->prepare('INSERT INTO bookings (vehicle_id, user_id, name, email, start_date, end_date, status, created_at) VALUES (?, ?, ?, ?, ?, ?, \'active\', NOW())');
+        $stmt->execute([$vehicle_id, $user_id ?: null, $name, $email, $start_date, $end_date]);
+
+        $pdo->prepare('UPDATE vehicles SET status = \'booked\' WHERE id = ?')->execute([$vehicle_id]);
+
+        $pdo->commit();
+        return true;
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/**
+ * Cancels an active booking and frees its vehicle, atomically.
+ */
+function cancelBooking(PDO $pdo, $booking_id) {
+    try {
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare('SELECT vehicle_id, status FROM bookings WHERE id = ? FOR UPDATE');
+        $stmt->execute([$booking_id]);
+        $booking = $stmt->fetch();
+
+        if (!$booking || $booking['status'] === 'cancelled') {
+            $pdo->rollBack();
+            return false;
+        }
+
+        $pdo->prepare('UPDATE bookings SET status = \'cancelled\' WHERE id = ?')->execute([$booking_id]);
+        $pdo->prepare('UPDATE vehicles SET status = \'available\' WHERE id = ?')->execute([$booking['vehicle_id']]);
+
+        $pdo->commit();
+        return true;
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
 }
 
 function getBookings(PDO $pdo) {

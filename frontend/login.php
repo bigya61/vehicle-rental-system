@@ -57,10 +57,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     <h1>Save Your Details</h1>
     <nav>
       <a href="index.php">Home</a>
-      <?php if (!empty($_SESSION['user']['id'])): ?>
-        <a href="add-car.php">Add Car</a>
-      <?php endif; ?>
-      <a href="../backend/admin.php">Admin</a>
+      <a href="../backend/admin-login.php">Admin</a>
     </nav>
   </header>
   <main>
