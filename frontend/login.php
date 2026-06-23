@@ -7,6 +7,10 @@ $email = $_POST['email'] ?? '';
 $phone = $_POST['phone'] ?? '';
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
     $name = trim($name);
     $email = trim($email);
     $password = $_POST['password'] ?? '';
@@ -16,8 +20,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
         if ($existingUser) {
             if ($user = authenticateUser($pdo, $email, $password)) {
+                session_regenerate_id(true);
                 $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'phone' => $user['phone']];
-                $redirect = $_SESSION['redirect_after_login'] ?? 'index.php';
+                $redirect = safeRedirectPath($_SESSION['redirect_after_login'] ?? null, 'index.php');
                 unset($_SESSION['redirect_after_login']);
                 header('Location: ' . $redirect);
                 exit;
@@ -28,8 +33,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $passwordHash = password_hash($password, PASSWORD_DEFAULT);
             createUser($pdo, $name, $email, $passwordHash, $phone);
             $user = getUserByEmail($pdo, $email);
+            session_regenerate_id(true);
             $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'phone' => $user['phone']];
-            $redirect = $_SESSION['redirect_after_login'] ?? 'index.php';
+            $redirect = safeRedirectPath($_SESSION['redirect_after_login'] ?? null, 'index.php');
             unset($_SESSION['redirect_after_login']);
             header('Location: ' . $redirect);
             exit;
@@ -89,6 +95,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
           <?php endif; ?>
 
           <form method="post" action="login.php" class="login-form">
+            <?php echo csrfField(); ?>
             <div class="form-group">
               <label for="name">Full Name</label>
               <input type="text" id="name" name="name" placeholder="Enter your name" required value="<?php echo htmlspecialchars($_SESSION['user']['name'] ?? ''); ?>">

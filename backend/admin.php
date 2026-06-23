@@ -15,8 +15,12 @@ if (!empty($_SESSION['flash'])) {
     unset($_SESSION['flash']);
 }
 
-if (isset($_GET['delete_vehicle'])) {
-    $vehicleId = (int) $_GET['delete_vehicle'];
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_vehicle'])) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
+    $vehicleId = (int) $_POST['delete_vehicle'];
     if ($vehicleId > 0) {
         deleteVehicle($pdo, $vehicleId);
         $_SESSION['flash'] = 'Vehicle deleted successfully.';
@@ -30,6 +34,10 @@ if (isset($_GET['edit'])) {
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehicle'])) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
     $vehicleId = (int) ($_POST['vehicle_id'] ?? 0);
     $make = trim($_POST['make'] ?? '');
     $model = trim($_POST['model'] ?? '');
@@ -46,7 +54,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehic
             updateVehicle($pdo, $vehicleId, $make, $model, $year ?: null, $price, $image);
             $_SESSION['flash'] = 'Vehicle updated successfully.';
         } else {
-            $ownerId = !empty($_SESSION['user']['id']) ? (int) $_SESSION['user']['id'] : 1;
+            $ownerId = !empty($_SESSION['user']['id'])
+                ? (int) $_SESSION['user']['id']
+                : (int) ($pdo->query("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
             createVehicle($pdo, $ownerId, $make, $model, $year ?: null, $price, $image);
             $_SESSION['flash'] = 'Vehicle added successfully.';
         }
@@ -146,6 +156,7 @@ $bookings = getBookings($pdo);
         <h2><?php echo $editVehicle ? 'Edit Vehicle' : 'Add New Vehicle'; ?></h2>
       </div>
       <form method="post" action="admin.php">
+        <?php echo csrfField(); ?>
         <div class="form-body">
           <div class="form-group">
             <label for="make">Make</label>
@@ -213,7 +224,11 @@ $bookings = getBookings($pdo);
                   <td><?php echo htmlspecialchars($vehicle['image']); ?></td>
                   <td>
                     <a class="action-link" href="admin.php?edit=<?php echo (int) $vehicle['id']; ?>">Edit</a>
-                    <a class="action-link delete-link" href="admin.php?delete_vehicle=<?php echo (int) $vehicle['id']; ?>" onclick="return confirm('Delete this vehicle?');">Delete</a>
+                    <form method="post" action="admin.php" style="display:inline;" onsubmit="return confirm('Delete this vehicle?');">
+                      <?php echo csrfField(); ?>
+                      <input type="hidden" name="delete_vehicle" value="<?php echo (int) $vehicle['id']; ?>">
+                      <button type="submit" class="action-link delete-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;">Delete</button>
+                    </form>
                   </td>
                 </tr>
               <?php endforeach; ?>

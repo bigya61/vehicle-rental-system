@@ -18,6 +18,10 @@ $price = trim($_POST['price_per_day'] ?? '');
 $image = trim($_POST['image'] ?? '');
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
     if ($make === '' || $model === '' || $price === '') {
         $error = 'Make, model, and price are required.';
     } elseif (!is_numeric($price) || (float) $price <= 0) {
@@ -60,6 +64,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
       </div>
 
       <form method="post" action="add-car.php" class="owner-form">
+        <?php echo csrfField(); ?>
         <?php if ($message): ?>
           <p class="message"><?php echo htmlspecialchars($message); ?></p>
         <?php endif; ?>

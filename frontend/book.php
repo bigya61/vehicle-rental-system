@@ -23,6 +23,11 @@ $vehicleTypes = [
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
+
     $vehicle_id = (int)($_POST['vehicle_id'] ?? 0);
 
     $name = trim($_POST['name'] ?? '');
@@ -33,7 +38,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
     $userId = !empty($_SESSION['user']['id']) ? (int) $_SESSION['user']['id'] : null;
 
-    if ($vehicle_id && $name && $email && $start_date && $end_date) {
+    if (!$vehicle_id || !$name || !$email || !$start_date || !$end_date) {
+        $message = 'Please fill all fields.';
+    } elseif (!getVehicle($pdo, $vehicle_id)) {
+        $message = 'Selected vehicle does not exist.';
+    } elseif ($end_date < $start_date) {
+        $message = 'Return date must be on or after the pickup date.';
+    } else {
 
         if (createBooking(
             $pdo,
@@ -51,10 +62,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
             $message = 'Booking failed — please try again.';
         }
-
-    } else {
-
-        $message = 'Please fill all fields.';
     }
 }
 ?>
@@ -189,6 +196,8 @@ $img = vehicleImagePath($vehicle);
       </p>
 
       <form method="post" action="book.php" class="booking-form">
+
+        <?php echo csrfField(); ?>
 
         <input
           type="hidden"

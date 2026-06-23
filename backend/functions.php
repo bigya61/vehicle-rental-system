@@ -1,19 +1,47 @@
 <?php
 require_once __DIR__ . '/config.php';
 
+function csrfToken(): string {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function csrfField(): string {
+    return '<input type="hidden" name="csrf_token" value="' . htmlspecialchars(csrfToken(), ENT_QUOTES) . '">';
+}
+
+function verifyCsrf(?string $token): bool {
+    return !empty($_SESSION['csrf_token'])
+        && is_string($token)
+        && hash_equals($_SESSION['csrf_token'], $token);
+}
+
+function safeRedirectPath(?string $path, string $default): string {
+    if (!is_string($path) || $path === '') {
+        return $default;
+    }
+    // Only allow same-app relative paths: no scheme, host, or protocol-relative URLs.
+    if (preg_match('#^[a-z][a-z0-9+.\-]*:#i', $path) || str_starts_with($path, '//') || str_contains($path, "\n")) {
+        return $default;
+    }
+    return $path;
+}
+
 function getVehicles(PDO $pdo) {
-    $stmt = $pdo->query('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v JOIN users u ON v.owner_id = u.id ORDER BY v.id');
+    $stmt = $pdo->query('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id ORDER BY v.id');
     return $stmt->fetchAll();
 }
 
 function getVehicle(PDO $pdo, $id) {
-    $stmt = $pdo->prepare('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v JOIN users u ON v.owner_id = u.id WHERE v.id = ?');
+    $stmt = $pdo->prepare('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id WHERE v.id = ?');
     $stmt->execute([$id]);
     return $stmt->fetch();
 }
 
 function getVehiclesByOwner(PDO $pdo, $owner_id) {
-    $stmt = $pdo->prepare('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v JOIN users u ON v.owner_id = u.id WHERE v.owner_id = ? ORDER BY v.id DESC');
+    $stmt = $pdo->prepare('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id WHERE v.owner_id = ? ORDER BY v.id DESC');
     $stmt->execute([$owner_id]);
     return $stmt->fetchAll();
 }

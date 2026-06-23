@@ -4,12 +4,17 @@ require_once __DIR__ . '/functions.php';
 $error = '';
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
     $user = getUserByEmail($pdo, $email);
 
     if ($user && $user['role'] === 'admin' && password_verify($password, $user['password'])) {
+        session_regenerate_id(true);
         $_SESSION['admin'] = true;
         $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email']];
         header('Location: admin.php');
@@ -44,6 +49,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
           <p class="message"><?php echo htmlspecialchars($error); ?></p>
         <?php endif; ?>
         <form method="post" action="admin-login.php" class="login-form">
+          <?php echo csrfField(); ?>
           <div class="form-group">
             <label for="email">Admin email</label>
             <input type="email" id="email" name="email" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
