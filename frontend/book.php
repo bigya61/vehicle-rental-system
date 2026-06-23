@@ -1,6 +1,14 @@
 <?php
 require_once __DIR__ . '/../backend/functions.php';
 
+// Booking requires a logged-in user account (separate from admin login).
+if (empty($_SESSION['user']['id'])) {
+    $vehicleParam = !empty($_GET['vehicle_id']) ? '?vehicle_id=' . (int) $_GET['vehicle_id'] : '';
+    $_SESSION['redirect_after_login'] = 'book.php' . $vehicleParam;
+    header('Location: login.php');
+    exit;
+}
+
 $vehicle = null;
 
 if (!empty($_GET['vehicle_id'])) {
@@ -23,6 +31,11 @@ $vehicleTypes = [
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
+
     $vehicle_id = (int)($_POST['vehicle_id'] ?? 0);
 
     $name = trim($_POST['name'] ?? '');
@@ -33,7 +46,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
     $userId = !empty($_SESSION['user']['id']) ? (int) $_SESSION['user']['id'] : null;
 
-    if ($vehicle_id && $name && $email && $start_date && $end_date) {
+    $targetVehicle = $vehicle_id ? getVehicle($pdo, $vehicle_id) : null;
+
+    if (!$vehicle_id || !$name || !$email || !$start_date || !$end_date) {
+        $message = 'Please fill all fields.';
+    } elseif (!$targetVehicle) {
+        $message = 'Selected vehicle does not exist.';
+    } elseif (isVehicleBooked($targetVehicle)) {
+        $message = 'Sorry, this vehicle is already booked.';
+    } elseif ($end_date < $start_date) {
+        $message = 'Return date must be on or after the pickup date.';
+    } else {
 
         if (createBooking(
             $pdo,
@@ -49,12 +72,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
         } else {
 
-            $message = 'Booking failed — please try again.';
+            $message = 'Sorry, this vehicle was just booked by someone else.';
         }
-
-    } else {
-
-        $message = 'Please fill all fields.';
     }
 }
 ?>
@@ -81,10 +100,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
   <nav>
     <a href="index.php">Home</a>
-    <?php if (!empty($_SESSION['user']['id'])): ?>
-      <a href="add-car.php">Add Car</a>
-    <?php endif; ?>
-    <a href="../backend/admin.php">Admin</a>
+    <a href="logout.php">Logout</a>
   </nav>
 
 </header>
@@ -140,9 +156,12 @@ $img = vehicleImagePath($vehicle);
       </h2>
 
       <p class="vehicle-description">
-        Book the
-        <?php echo htmlspecialchars($vehicle['make'] . ' ' . $vehicle['model']); ?>
-        for your next trip.
+        <?php
+        $desc = trim($vehicle['description'] ?? '');
+        echo $desc !== ''
+            ? nl2br(htmlspecialchars($desc))
+            : htmlspecialchars('Book the ' . $vehicle['make'] . ' ' . $vehicle['model'] . ' for your next trip.');
+        ?>
       </p>
 
       <div class="vehicle-image">
@@ -188,7 +207,18 @@ $img = vehicleImagePath($vehicle);
         Book your selected vehicle with flexible pickup options and clear pricing.
       </p>
 
+      <?php if (isVehicleBooked($vehicle)): ?>
+
+      <p class="message" style="background:#7f1d1d;color:#fee2e2;">
+        This vehicle is currently <strong>booked</strong> and unavailable.
+        Browse other cars on the <a href="index.php">home page</a>.
+      </p>
+
+      <?php else: ?>
+
       <form method="post" action="book.php" class="booking-form">
+
+        <?php echo csrfField(); ?>
 
         <input
           type="hidden"
@@ -281,6 +311,8 @@ $img = vehicleImagePath($vehicle);
         </button>
 
       </form>
+
+      <?php endif; ?>
 
     </div>
 

@@ -46,6 +46,8 @@ function ensureDatabaseSchema(PDO $pdo): void
                 year INT DEFAULT NULL,
                 price_per_day DECIMAL(8,2) DEFAULT 0.00,
                 image VARCHAR(255) DEFAULT NULL,
+                description TEXT DEFAULT NULL,
+                status ENUM('available', 'booked') NOT NULL DEFAULT 'available',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
@@ -55,6 +57,12 @@ function ensureDatabaseSchema(PDO $pdo): void
         }
         if (!columnExists($pdo, 'vehicles', 'image')) {
             $pdo->exec('ALTER TABLE vehicles ADD COLUMN image VARCHAR(255) DEFAULT NULL');
+        }
+        if (!columnExists($pdo, 'vehicles', 'description')) {
+            $pdo->exec('ALTER TABLE vehicles ADD COLUMN description TEXT DEFAULT NULL');
+        }
+        if (!columnExists($pdo, 'vehicles', 'status')) {
+            $pdo->exec("ALTER TABLE vehicles ADD COLUMN status ENUM('available', 'booked') NOT NULL DEFAULT 'available'");
         }
         if (!columnExists($pdo, 'vehicles', 'created_at')) {
             $pdo->exec('ALTER TABLE vehicles ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
@@ -71,11 +79,17 @@ function ensureDatabaseSchema(PDO $pdo): void
                 email VARCHAR(255) NOT NULL,
                 start_date DATE NOT NULL,
                 end_date DATE NOT NULL,
+                status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
-    } elseif (!columnExists($pdo, 'bookings', 'user_id')) {
-        $pdo->exec('ALTER TABLE bookings ADD COLUMN user_id INT DEFAULT NULL AFTER vehicle_id');
+    } else {
+        if (!columnExists($pdo, 'bookings', 'user_id')) {
+            $pdo->exec('ALTER TABLE bookings ADD COLUMN user_id INT DEFAULT NULL AFTER vehicle_id');
+        }
+        if (!columnExists($pdo, 'bookings', 'status')) {
+            $pdo->exec("ALTER TABLE bookings ADD COLUMN status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active'");
+        }
     }
 
     $adminPassword = '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa';

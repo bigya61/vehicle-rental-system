@@ -45,11 +45,9 @@ $vehicleTypes = [
 
       <a href="#fleet">Fleet</a>
 
-      <a href="../backend/admin.php">Admin</a>
+      <a href="../backend/admin-login.php">Admin</a>
 
       <?php if (!empty($_SESSION['user']['name'])): ?>
-
-        <a href="add-car.php">Add Car</a>
 
         <span class="user-pill">
 
@@ -181,6 +179,10 @@ $vehicleTypes = [
 
                 </span>
 
+                <?php if (isVehicleBooked($v)): ?>
+                  <span class="vehicle-tag" style="left:auto;right:12px;background:#dc2626;color:#fff;">Booked</span>
+                <?php endif; ?>
+
               </div>
 
               <div class="vehicle-details">
@@ -208,12 +210,22 @@ $vehicleTypes = [
 
                   </p>
 
-                  <a
-                    class="btn btn-primary btn-small"
-                    href="book.php?vehicle_id=<?php echo $v['id']; ?>"
-                  >
-                    Book now
-                  </a>
+                  <?php if (isVehicleBooked($v)): ?>
+                    <span
+                      class="btn btn-small"
+                      style="background:#374151;color:#9ca3af;cursor:not-allowed;"
+                      aria-disabled="true"
+                    >
+                      Booked
+                    </span>
+                  <?php else: ?>
+                    <a
+                      class="btn btn-primary btn-small"
+                      href="book.php?vehicle_id=<?php echo $v['id']; ?>"
+                    >
+                      Book now
+                    </a>
+                  <?php endif; ?>
 
                 </div>
 
