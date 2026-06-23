@@ -10,6 +10,10 @@ Setup (XAMPP on macOS):
 Default DB credentials: host `127.0.0.1`, user `root`, empty password (update `config.php` if different).
 Admin login: email `admin@example.com`, password `admin123`.
 
+> Note: When running under XAMPP, the MySQL database is managed inside XAMPP.
+> If you already imported or updated the schema there, the app will connect to
+> that existing `rentalsystem` database automatically.
+
 Database design:
 - `users` stores registered users and admins
 - `vehicles` now has `owner_id` to map which user posted each car

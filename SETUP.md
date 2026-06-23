@@ -19,9 +19,13 @@ Default DB connection (hardcoded in `backend/config.php`):
 host: 127.0.0.1   port: 3306   db: rentalsystem   user: root   password: (empty)
 ```
 
+> The database lives inside XAMPP and is accessed over local TCP. If you have
+> already imported the schema into XAMPP/MAMP/phpMyAdmin, the app will connect
+> to that existing database and use the current schema.
+>
 > The database, all tables, the admin user, and 3 demo cars are created
-> AUTOMATICALLY on first page load by `backend/schema.php`. You do NOT run any
-> SQL by hand. `backend/db.sql` is optional and only for manual seeding.
+> AUTOMATICALLY on first page load by `backend/schema.php` only when needed.
+> You do NOT need to run SQL by hand unless you prefer manual import.
 
 ---
 
@@ -45,7 +49,9 @@ Pick ONE.
 ```bash
 sudo /Applications/XAMPP/xamppfiles/xampp startmysql
 ```
-
+> Note: When using XAMPP, the database is managed by XAMPP itself. You can
+> inspect it through phpMyAdmin at `http://localhost/phpmyadmin` and verify that
+> the `rentalsystem` schema is present.
 **Linux service (MariaDB/MySQL):**
 ```bash
 sudo service mariadb start   # or: sudo service mysql start
@@ -85,6 +91,10 @@ Pick ONE. Run from the project root (the folder containing `frontend/` and
 
 **XAMPP Apache** — place project at `htdocs/rentalsystem`, start Apache, then
 base URL = `http://localhost/rentalsystem`.
+
+> Important: open the app through the web server URL in your browser, e.g.
+> `http://localhost/rentalsystem/frontend/login.php`. Do not open `login.php`
+> directly from the file system.
 
 **PHP built-in server:**
 ```bash
