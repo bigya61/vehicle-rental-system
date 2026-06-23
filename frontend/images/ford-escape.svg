@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 180">
+  <rect width="300" height="180" rx="20" fill="#007f5f"/>
+  <rect x="40" y="65" width="220" height="75" rx="18" fill="#f8f3d4"/>
+  <circle cx="80" cy="150" r="18" fill="#f8f3d4"/>
+  <circle cx="220" cy="150" r="18" fill="#f8f3d4"/>
+  <path d="M60 80 H120 Q140 70 170 80 H240" stroke="#007f5f" stroke-width="8" fill="none"/>
+  <text x="150" y="115" text-anchor="middle" fill="#007f5f" font-family="Arial,Helvetica,sans-serif" font-size="20">Escape</text>
+</svg>

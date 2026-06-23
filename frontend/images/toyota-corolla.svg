@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 180">
+  <rect width="300" height="180" rx="20" fill="#0d3b66"/>
+  <rect x="40" y="70" width="220" height="70" rx="18" fill="#faf0ca"/>
+  <circle cx="90" cy="150" r="18" fill="#faf0ca"/>
+  <circle cx="210" cy="150" r="18" fill="#faf0ca"/>
+  <rect x="55" y="50" width="190" height="30" rx="12" fill="#faf0ca"/>
+  <text x="150" y="110" text-anchor="middle" fill="#0d3b66" font-family="Arial,Helvetica,sans-serif" font-size="20">Corolla</text>
+</svg>

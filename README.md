@@ -1,0 +1,40 @@
+Vehicle Rental System — minimal PHP app
+
+Setup (XAMPP on macOS):
+
+1. Copy the `rentalsystem` folder into XAMPP htdocs (already in `/Applications/XAMPP/xamppfiles/htdocs/rentalsystem`).
+2. Start Apache and MySQL via XAMPP Control Panel.
+3. Open phpMyAdmin (http://localhost/phpmyadmin) and import `db.sql` or run the SQL in the SQL tab.
+4. Visit http://localhost/rentalsystem/ to view the site.
+
+Default DB credentials: host `127.0.0.1`, user `root`, empty password (update `config.php` if different).
+Admin login: username `admin`, password `admin123`.
+
+Files:
+- `frontend/index.php` — public listing of vehicles with responsive car cards
+- `frontend/book.php` — booking form and handler with vehicle image preview
+- `frontend/login.php` — user login page
+- `frontend/logout.php` — logout handler
+- `backend/admin.php` — admin dashboard to manage vehicles and view bookings
+- `backend/admin-login.php` — admin login page
+- `backend/config.php` — PDO connection
+- `backend/functions.php` — DB helpers
+- `frontend/css/styles.css` — responsive styles
+- `frontend/images/` — vehicle image assets
+
+Root proxy files:
+- `index.php`, `book.php`, `login.php`, `logout.php`, `admin.php`, `admin-login.php`
+  redirect into the `frontend/` and `backend/` folders.
+
+Next steps:
+- Add authentication for `admin.php`.
+- Add availability checks and date validation.
+- Add image uploads for vehicles.
+
+If you already imported the old database schema, add vehicle image paths with:
+```sql
+ALTER TABLE vehicles ADD COLUMN image VARCHAR(255) DEFAULT NULL;
+UPDATE vehicles SET image = 'images/placeholder.svg' WHERE image IS NULL;
+```
+Then refresh the home page.
+

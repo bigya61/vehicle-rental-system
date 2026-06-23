@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 180">
+  <rect width="300" height="180" rx="20" fill="#034f84"/>
+  <rect x="40" y="70" width="220" height="70" rx="18" fill="#f0efeb"/>
+  <circle cx="90" cy="150" r="18" fill="#f0efeb"/>
+  <circle cx="210" cy="150" r="18" fill="#f0efeb"/>
+  <path d="M55 70 Q80 40 140 70 T245 70" fill="#f0efeb" opacity="0.3"/>
+  <text x="150" y="110" text-anchor="middle" fill="#034f84" font-family="Arial,Helvetica,sans-serif" font-size="20">Civic</text>
+</svg>
