@@ -3,18 +3,20 @@ require_once __DIR__ . '/functions.php';
 
 $error = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim($_POST['username'] ?? '');
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    if ($username === ADMIN_USER && $password === ADMIN_PASS) {
+    $user = getUserByEmail($pdo, $email);
+
+    if ($user && $user['role'] === 'admin' && password_verify($password, $user['password'])) {
         $_SESSION['admin'] = true;
-        $_SESSION['user'] = ['name' => 'Admin', 'email' => 'admin@example.com'];
+        $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email']];
         header('Location: admin.php');
         exit;
     }
 
-    $error = 'Invalid username or password.';
+    $error = 'Invalid admin credentials.';
 }
 ?>
 
@@ -30,8 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <header class="page-header">
     <h1>Admin Login</h1>
     <nav>
-      <a href="../index.php">Home</a>
-      <a href="../login.php">User Login</a>
+      <a href="../frontend/index.php">Home</a>
+      <a href="../frontend/login.php">User Login</a>
     </nav>
   </header>
   <main>
@@ -43,8 +45,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
         <form method="post" action="admin-login.php" class="login-form">
           <div class="form-group">
-            <label for="username">Username</label>
-            <input type="text" id="username" name="username" required value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>">
+            <label for="email">Admin email</label>
+            <input type="email" id="email" name="email" required value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
           </div>
           <div class="form-group">
             <label for="password">Password</label>

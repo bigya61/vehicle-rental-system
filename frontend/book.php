@@ -1,4 +1,3 @@
-
 <?php
 require_once __DIR__ . '/../backend/functions.php';
 
@@ -22,7 +21,7 @@ $vehicleTypes = [
 |--------------------------------------------------------------------------
 */
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
     $vehicle_id = (int)($_POST['vehicle_id'] ?? 0);
 
@@ -32,11 +31,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $start_date = $_POST['start_date'] ?? '';
     $end_date = $_POST['end_date'] ?? '';
 
+    $userId = !empty($_SESSION['user']['id']) ? (int) $_SESSION['user']['id'] : null;
+
     if ($vehicle_id && $name && $email && $start_date && $end_date) {
 
         if (createBooking(
             $pdo,
             $vehicle_id,
+            $userId,
             $name,
             $email,
             $start_date,
@@ -79,8 +81,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   <nav>
     <a href="index.php">Home</a>
-    <a href="../admin.php">Admin</a>
+    <?php if (!empty($_SESSION['user']['id'])): ?>
+      <a href="add-car.php">Add Car</a>
+    <?php endif; ?>
+    <a href="../backend/admin.php">Admin</a>
   </nav>
+
+</header>
+
+<main>
+
 <?php if ($message): ?>
 
   <p class="message">
@@ -111,27 +121,7 @@ if (!$vehicle && !empty($_POST['vehicle_id'])) {
 |--------------------------------------------------------------------------
 */
 
-switch(strtolower($vehicle['make'])) {
-
-    case 'toyota':
-        $img = 'images/toyota.jpg';
-        break;
-
-    case 'honda':
-        $img = 'images/honda.jpg';
-        break;
-
-    case 'ford':
-        $img = 'images/ford.jpg';
-        break;
-
-    case 'bmw':
-        $img = 'images/bmw.jpg';
-        break;
-
-    default:
-        $img = 'images/default-car.jpg';
-}
+$img = vehicleImagePath($vehicle);
 
 ?>
 
@@ -191,7 +181,7 @@ switch(strtolower($vehicle['make'])) {
       </span>
 
       <div class="price-display">
-        NPR <?php echo htmlspecialchars($vehicle['price_per_day']* 100, 0); ?> / day
+        NPR <?php echo htmlspecialchars(number_format((float) $vehicle['price_per_day'], 0)); ?> / day
       </div>
 
       <p class="summary-description">
@@ -281,7 +271,7 @@ switch(strtolower($vehicle['make'])) {
           <span>Total:</span>
 
           <span class="total-price">
-            NPR <?php echo htmlspecialchars($vehicle['price_per_day']* 100, 0); ?> / day
+            NPR <?php echo htmlspecialchars(number_format((float) $vehicle['price_per_day'], 0)); ?> / day
           </span>
 
         </div>

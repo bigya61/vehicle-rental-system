@@ -45,22 +45,24 @@ $vehicleTypes = [
 
       <a href="#fleet">Fleet</a>
 
-      <a href="../admin.php">Admin</a>
+      <a href="../backend/admin.php">Admin</a>
 
       <?php if (!empty($_SESSION['user']['name'])): ?>
+
+        <a href="add-car.php">Add Car</a>
 
         <span class="user-pill">
 
           Logged in as
           <?php echo htmlspecialchars($_SESSION['user']['name']); ?>
 
-          (<a href="../logout.php">Logout</a>)
+          (<a href="logout.php">Logout</a>)
 
         </span>
 
       <?php else: ?>
 
-        <a href="../login.php">Login</a>
+        <a href="login.php">Login</a>
 
       <?php endif; ?>
 
@@ -160,27 +162,7 @@ $vehicleTypes = [
             |--------------------------------------------------------------------------
             */
 
-            switch(strtolower($v['make'])) {
-
-                case 'toyota':
-                    $img = 'images/toyota.jpg';
-                    break;
-
-                case 'honda':
-                    $img = 'images/honda.jpg';
-                    break;
-
-                case 'ford':
-                    $img = 'images/ford.jpg';
-                    break;
-
-                case 'bmw':
-                    $img = 'images/bmw.jpg';
-                    break;
-
-                default:
-                    $img = 'images/default-car.jpg';
-            }
+            $img = vehicleImagePath($v);
 
             ?>
 
@@ -221,7 +203,7 @@ $vehicleTypes = [
                   <p class="vehicle-price">
 
                     NPR
-                    <?php echo htmlspecialchars($v['price_per_day'] * 100, 0); ?>
+                    <?php echo htmlspecialchars(number_format((float) $v['price_per_day'], 0)); ?>
                     / day
 
                   </p>

@@ -1,14 +1,41 @@
 <?php
 require_once __DIR__ . '/../backend/functions.php';
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name = trim($_POST['name'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    if ($name && $email) {
-        $_SESSION['user'] = ['name' => $name, 'email' => $email];
-        header('Location: index.php');
-        exit;
+
+$error = '';
+$name = $_POST['name'] ?? '';
+$email = $_POST['email'] ?? '';
+$phone = $_POST['phone'] ?? '';
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    $name = trim($name);
+    $email = trim($email);
+    $password = $_POST['password'] ?? '';
+
+    if ($name && $email && $password) {
+        $existingUser = getUserByEmail($pdo, $email);
+
+        if ($existingUser) {
+            if ($user = authenticateUser($pdo, $email, $password)) {
+                $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'phone' => $user['phone']];
+                $redirect = $_SESSION['redirect_after_login'] ?? 'index.php';
+                unset($_SESSION['redirect_after_login']);
+                header('Location: ' . $redirect);
+                exit;
+            }
+
+            $error = 'Invalid login credentials.';
+        } else {
+            $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+            createUser($pdo, $name, $email, $passwordHash, $phone);
+            $user = getUserByEmail($pdo, $email);
+            $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'phone' => $user['phone']];
+            $redirect = $_SESSION['redirect_after_login'] ?? 'index.php';
+            unset($_SESSION['redirect_after_login']);
+            header('Location: ' . $redirect);
+            exit;
+        }
     } else {
-        $error = 'Please provide both name and email.';
+        $error = 'Please provide your name, email, and password.';
     }
 }
 ?><!doctype html>
@@ -24,7 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <h1>Save Your Details</h1>
     <nav>
       <a href="index.php">Home</a>
-      <a href="../admin.php">Admin</a>
+      <?php if (!empty($_SESSION['user']['id'])): ?>
+        <a href="add-car.php">Add Car</a>
+      <?php endif; ?>
+      <a href="../backend/admin.php">Admin</a>
     </nav>
   </header>
   <main>
