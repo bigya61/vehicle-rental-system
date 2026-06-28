@@ -60,7 +60,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehic
     $description = trim($_POST['description'] ?? '');
 
     if ($make === '' || $model === '' || $price === '') {
-        $error = 'Make, model, and price are required.';
+        $error = 'make, model, and price are required.';
     } elseif (!is_numeric($price) || (float) $price < 0) {
         $error = 'Price must be a valid number.';
     } else {

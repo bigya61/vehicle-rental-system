@@ -1,5 +1,6 @@
 # Run Instructions
-
+cd /Applications/XAMPP/xamppfiles/htdocs/rentalsystem
+/Applications/XAMPP/xamppfiles/bin/php -S 127.0.0.1:8081
 ## Project Overview
 
 Vehicle Rental System is a minimal PHP + MySQL web app. Users can browse vehicles, register/log in, and make bookings. Admins manage the fleet and view bookings through a separate dashboard. There is no JavaScript build step — only PHP, MySQL, and static CSS assets.
