@@ -1,6 +1,119 @@
 <?php
 require_once __DIR__ . '/config.php';
 
+function authCookieSecureFlag(): bool {
+    return isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+}
+
+function setAuthCookie(array $payload): void {
+    $payload['exp'] = time() + AUTH_COOKIE_DURATION;
+    $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        return;
+    }
+
+    $signature = hash_hmac('sha256', $json, AUTH_COOKIE_SECRET, true);
+    $value = base64_encode($json) . '.' . base64_encode($signature);
+
+    setcookie(
+        AUTH_COOKIE_NAME,
+        $value,
+        [
+            'expires' => time() + AUTH_COOKIE_DURATION,
+            'path' => '/',
+            'httponly' => true,
+            'samesite' => AUTH_COOKIE_SAMESITE,
+            'secure' => authCookieSecureFlag(),
+        ]
+    );
+}
+
+function clearAuthCookie(): void {
+    setcookie(
+        AUTH_COOKIE_NAME,
+        '',
+        [
+            'expires' => time() - 3600,
+            'path' => '/',
+            'httponly' => true,
+            'samesite' => AUTH_COOKIE_SAMESITE,
+            'secure' => authCookieSecureFlag(),
+        ]
+    );
+}
+
+function getAuthCookiePayload(): ?array {
+    if (empty($_COOKIE[AUTH_COOKIE_NAME]) || !is_string($_COOKIE[AUTH_COOKIE_NAME])) {
+        return null;
+    }
+
+    $parts = explode('.', $_COOKIE[AUTH_COOKIE_NAME], 2);
+    if (count($parts) !== 2) {
+        return null;
+    }
+
+    [$encodedJson, $encodedSig] = $parts;
+    $json = base64_decode($encodedJson, true);
+    $sig = base64_decode($encodedSig, true);
+    if ($json === false || $sig === false) {
+        return null;
+    }
+
+    $expectedSig = hash_hmac('sha256', $json, AUTH_COOKIE_SECRET, true);
+    if (!hash_equals($expectedSig, $sig)) {
+        return null;
+    }
+
+    $payload = json_decode($json, true);
+    if (!is_array($payload) || empty($payload['id']) || empty($payload['email']) || empty($payload['role']) || empty($payload['exp'])) {
+        return null;
+    }
+
+    if (!in_array($payload['role'], ['user', 'admin'], true)) {
+        return null;
+    }
+
+    if (!is_int($payload['exp']) && !ctype_digit((string) $payload['exp'])) {
+        return null;
+    }
+
+    if (time() > (int) $payload['exp']) {
+        return null;
+    }
+
+    return $payload;
+}
+
+function restoreLoginFromCookie(PDO $pdo): void {
+    if (!empty($_SESSION['user'])) {
+        return;
+    }
+
+    $payload = getAuthCookiePayload();
+    if (!$payload) {
+        return;
+    }
+
+    $user = getUserById($pdo, $payload['id']);
+    if (!$user || $user['email'] !== $payload['email'] || $user['role'] !== $payload['role']) {
+        clearAuthCookie();
+        return;
+    }
+
+    session_regenerate_id(true);
+    $_SESSION['user'] = [
+        'id' => $user['id'],
+        'name' => $user['name'],
+        'email' => $user['email'],
+        'phone' => $user['phone'],
+    ];
+    if ($user['role'] === 'admin') {
+        $_SESSION['admin'] = true;
+    }
+}
+
+restoreLoginFromCookie($pdo);
+
 function csrfToken(): string {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -27,6 +140,50 @@ function safeRedirectPath(?string $path, string $default): string {
         return $default;
     }
     return $path;
+}
+
+function ensureVehicleAssetDirectory(): string {
+    $dir = __DIR__ . '/assets';
+    if (!is_dir($dir)) {
+        mkdir($dir, 0777, true);
+    }
+    return $dir;
+}
+
+function handleVehicleImageUpload(?array $file, ?string $existingImage = null): string {
+    if (!is_array($file) || empty($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
+        return trim((string) ($existingImage ?? ''));
+    }
+
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        return trim((string) ($existingImage ?? ''));
+    }
+
+    $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'svg', 'gif'];
+    $extension = strtolower(pathinfo($file['name'] ?? '', PATHINFO_EXTENSION));
+    if (!in_array($extension, $allowedExtensions, true)) {
+        return trim((string) ($existingImage ?? ''));
+    }
+
+    if (($file['size'] ?? 0) > 5 * 1024 * 1024) {
+        return trim((string) ($existingImage ?? ''));
+    }
+
+    $assetDir = ensureVehicleAssetDirectory();
+    $baseName = preg_replace('/[^a-zA-Z0-9._-]/', '-', pathinfo($file['name'] ?? 'vehicle', PATHINFO_FILENAME));
+    $baseName = trim((string) $baseName, '-.');
+    if ($baseName === '') {
+        $baseName = 'vehicle';
+    }
+
+    $fileName = $baseName . '-' . time() . '-' . bin2hex(random_bytes(4)) . '.' . $extension;
+    $targetPath = $assetDir . '/' . $fileName;
+
+    if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
+        return trim((string) ($existingImage ?? ''));
+    }
+
+    return '../backend/assets/' . $fileName;
 }
 
 function getVehicles(PDO $pdo) {
@@ -165,5 +322,11 @@ function cancelBooking(PDO $pdo, $booking_id) {
 
 function getBookings(PDO $pdo) {
     $stmt = $pdo->query('SELECT b.*, v.make, v.model, u.name AS user_name, u.email AS user_email FROM bookings b JOIN vehicles v ON b.vehicle_id = v.id LEFT JOIN users u ON b.user_id = u.id ORDER BY b.created_at DESC');
+    return $stmt->fetchAll();
+}
+
+function getBookingsByUser(PDO $pdo, int $user_id) {
+    $stmt = $pdo->prepare('SELECT b.*, v.make, v.model FROM bookings b JOIN vehicles v ON b.vehicle_id = v.id WHERE b.user_id = ? ORDER BY b.created_at DESC');
+    $stmt->execute([$user_id]);
     return $stmt->fetchAll();
 }

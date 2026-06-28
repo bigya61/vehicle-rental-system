@@ -58,6 +58,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehic
     $price = trim($_POST['price_per_day'] ?? '');
     $image = trim($_POST['image'] ?? '');
     $description = trim($_POST['description'] ?? '');
+    $image = handleVehicleImageUpload($_FILES['image_file'] ?? null, $image);
 
     if ($make === '' || $model === '' || $price === '') {
         $error = 'make, model, and price are required.';
@@ -108,7 +109,14 @@ $bookings = getBookings($pdo);
     .form-header h2, .table-header h2 { margin:0; }
     .form-body { padding:24px 30px; display:grid; grid-template-columns:1fr 1fr; gap:20px; }
     .form-group label { display:block; margin-bottom:8px; color:#9ca3af; }
-    .form-group input { width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; background:#0f172a; color:#e2e8f0; }
+    .form-group input, .form-group textarea { width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; background:#0f172a; color:#e2e8f0; }
+    .image-dropzone { border:2px dashed #475569; border-radius:12px; padding:20px; background:#0f172a; cursor:pointer; text-align:center; transition:border-color .2s ease, transform .2s ease; }
+    .image-dropzone.is-dragover { border-color:#f59e0b; transform:translateY(-1px); }
+    .image-dropzone p { margin:6px 0; color:#cbd5e1; }
+    .dropzone-hint { font-size:13px; color:#94a3b8; }
+    .image-dropzone-preview { margin-top:12px; display:flex; justify-content:center; }
+    .image-dropzone-preview img { max-height:160px; max-width:100%; border-radius:8px; object-fit:cover; }
+    .helper-text { display:block; margin-top:8px; color:#94a3b8; font-size:13px; }
     .form-actions { padding:0 30px 30px; display:flex; gap:12px; }
     .btn { display:inline-block; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:700; border:none; cursor:pointer; }
     .btn-primary { background:#f59e0b; color:#111827; }
@@ -169,7 +177,7 @@ $bookings = getBookings($pdo);
       <div class="form-header">
         <h2><?php echo $editVehicle ? 'Edit Vehicle' : 'Add New Vehicle'; ?></h2>
       </div>
-      <form method="post" action="admin.php">
+      <form method="post" action="admin.php" enctype="multipart/form-data">
         <?php echo csrfField(); ?>
         <div class="form-body">
           <div class="form-group">
@@ -189,12 +197,22 @@ $bookings = getBookings($pdo);
             <input id="price_per_day" name="price_per_day" type="number" step="0.01" min="0" value="<?php echo htmlspecialchars($editVehicle['price_per_day'] ?? ''); ?>" required>
           </div>
           <div class="form-group form-group-wide" style="grid-column:span 2;">
+            <label for="image_file">Vehicle image</label>
+            <div id="image-dropzone" class="image-dropzone" tabindex="0" role="button" aria-label="Upload vehicle image">
+              <input id="image_file" name="image_file" type="file" accept="image/*" hidden>
+              <p><strong>Drop an image here</strong> or click to browse</p>
+              <p class="dropzone-hint">PNG, JPG, WEBP, SVG, or GIF up to 5MB</p>
+              <div id="image-dropzone-preview" class="image-dropzone-preview"></div>
+            </div>
+            <small class="helper-text">You can also type a path manually if you already have an image. Uploading a file overrides the text path.</small>
+          </div>
+          <div class="form-group form-group-wide" style="grid-column:span 2;">
             <label for="image">Image path</label>
             <input id="image" name="image" value="<?php echo htmlspecialchars($editVehicle['image'] ?? ''); ?>" placeholder="images/toyota.jpg">
           </div>
           <div class="form-group form-group-wide" style="grid-column:span 2;">
             <label for="description">Details</label>
-            <textarea id="description" name="description" rows="3" style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #334155;border-radius:8px;background:#0f172a;color:#e2e8f0;" placeholder="Seats, transmission, mileage, condition, etc."><?php echo htmlspecialchars($editVehicle['description'] ?? ''); ?></textarea>
+            <textarea id="description" name="description" rows="3" placeholder="Seats, transmission, mileage, condition, etc."><?php echo htmlspecialchars($editVehicle['description'] ?? ''); ?></textarea>
           </div>
         </div>
         <div class="form-actions">
@@ -322,5 +340,65 @@ $bookings = getBookings($pdo);
   </main>
 
   <footer class="page-footer">&copy; <?php echo date('Y'); ?> Vehicle Rental</footer>
+  <script>
+    (function () {
+      const dropzone = document.getElementById('image-dropzone');
+      const fileInput = document.getElementById('image_file');
+      const preview = document.getElementById('image-dropzone-preview');
+      const pathInput = document.getElementById('image');
+
+      if (!dropzone || !fileInput || !preview) {
+        return;
+      }
+
+      const showSelectedFile = (file) => {
+        preview.innerHTML = '';
+        if (!file) {
+          return;
+        }
+        const image = document.createElement('img');
+        image.src = URL.createObjectURL(file);
+        image.alt = file.name;
+        preview.appendChild(image);
+        pathInput.value = '';
+      };
+
+      dropzone.addEventListener('click', () => fileInput.click());
+      dropzone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          fileInput.click();
+        }
+      });
+
+      ['dragenter', 'dragover'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.add('is-dragover');
+        });
+      });
+
+      ['dragleave', 'dragend', 'drop'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.remove('is-dragover');
+        });
+      });
+
+      dropzone.addEventListener('drop', (event) => {
+        const file = event.dataTransfer?.files?.[0];
+        if (file) {
+          showSelectedFile(file);
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          fileInput.files = dataTransfer.files;
+        }
+      });
+
+      fileInput.addEventListener('change', (event) => {
+        showSelectedFile(event.target.files?.[0] || null);
+      });
+    })();
+  </script>
 </body>
 </html>

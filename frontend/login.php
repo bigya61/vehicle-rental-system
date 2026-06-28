@@ -22,6 +22,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             if ($user = authenticateUser($pdo, $email, $password)) {
                 session_regenerate_id(true);
                 $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'phone' => $user['phone']];
+                if ($user['role'] === 'admin') {
+                    $_SESSION['admin'] = true;
+                }
+                setAuthCookie(['id' => $user['id'], 'email' => $user['email'], 'role' => $user['role']]);
                 $redirect = safeRedirectPath($_SESSION['redirect_after_login'] ?? null, 'index.php');
                 unset($_SESSION['redirect_after_login']);
                 header('Location: ' . $redirect);
@@ -35,6 +39,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $user = getUserByEmail($pdo, $email);
             session_regenerate_id(true);
             $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email'], 'phone' => $user['phone']];
+            setAuthCookie(['id' => $user['id'], 'email' => $user['email'], 'role' => $user['role']]);
             $redirect = safeRedirectPath($_SESSION['redirect_after_login'] ?? null, 'index.php');
             unset($_SESSION['redirect_after_login']);
             header('Location: ' . $redirect);

@@ -47,6 +47,10 @@ $vehicleTypes = [
 
       <a href="../backend/admin-login.php">Admin</a>
 
+      <?php if (!empty($_SESSION['user'])): ?>
+        <a href="my-bookings.php">My Bookings</a>
+      <?php endif; ?>
+
       <?php if (!empty($_SESSION['user']['name'])): ?>
 
         <span class="user-pill">

@@ -7,6 +7,19 @@ if (!isset($_SESSION)) {
     $_SESSION = [];
 }
 
+if (!defined('AUTH_COOKIE_NAME')) {
+    define('AUTH_COOKIE_NAME', 'rentalsystem_auth');
+}
+if (!defined('AUTH_COOKIE_SECRET')) {
+    define('AUTH_COOKIE_SECRET', 'xE4f8uPq2B7nK1wLzV9sY0mTtQ3rGaHi');
+}
+if (!defined('AUTH_COOKIE_DURATION')) {
+    define('AUTH_COOKIE_DURATION', 60 * 60 * 24 * 30);
+}
+if (!defined('AUTH_COOKIE_SAMESITE')) {
+    define('AUTH_COOKIE_SAMESITE', 'Lax');
+}
+
 $host = '127.0.0.1';
 $db   = 'rentalsystem';
 $user = 'root';

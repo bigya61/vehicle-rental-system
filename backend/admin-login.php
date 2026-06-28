@@ -1,6 +1,11 @@
 <?php
 require_once __DIR__ . '/functions.php';
 
+if (!empty($_SESSION['admin'])) {
+    header('Location: admin.php');
+    exit;
+}
+
 $error = '';
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
@@ -17,6 +22,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         session_regenerate_id(true);
         $_SESSION['admin'] = true;
         $_SESSION['user'] = ['id' => $user['id'], 'name' => $user['name'], 'email' => $user['email']];
+        setAuthCookie(['id' => $user['id'], 'email' => $user['email'], 'role' => 'admin']);
         header('Location: admin.php');
         exit;
     }
