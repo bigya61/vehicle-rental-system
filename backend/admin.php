@@ -2,7 +2,8 @@
 require_once __DIR__ . '/functions.php';
 
 if (empty($_SESSION['admin']) || $_SESSION['admin'] !== true) {
-    header('Location: admin-login.php');
+  $_SESSION['redirect_after_login'] = '../backend/admin.php';
+    header('Location: ../frontend/login.php');
     exit;
 }
 
@@ -56,7 +57,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehic
     $model = trim($_POST['model'] ?? '');
     $year = trim($_POST['year'] ?? '');
     $price = trim($_POST['price_per_day'] ?? '');
-    $image = trim($_POST['image'] ?? '');
+    $image = normalizeVehicleImagePath($_POST['image'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $image = handleVehicleImageUpload($_FILES['image_file'] ?? null, $image);
 
@@ -64,6 +65,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehic
         $error = 'make, model, and price are required.';
     } elseif (!is_numeric($price) || (float) $price < 0) {
         $error = 'Price must be a valid number.';
+    } elseif (!isValidVehicleImageReference($image)) {
+      $error = 'Image must be a direct image URL or a valid image path ending in jpg, jpeg, png, webp, svg, or gif.';
     } else {
         if ($vehicleId > 0) {
             updateVehicle($pdo, $vehicleId, $make, $model, $year ?: null, $price, $image, $description ?: null);
@@ -110,12 +113,13 @@ $bookings = getBookings($pdo);
     .form-body { padding:24px 30px; display:grid; grid-template-columns:1fr 1fr; gap:20px; }
     .form-group label { display:block; margin-bottom:8px; color:#9ca3af; }
     .form-group input, .form-group textarea { width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; background:#0f172a; color:#e2e8f0; }
-    .image-dropzone { border:2px dashed #475569; border-radius:12px; padding:20px; background:#0f172a; cursor:pointer; text-align:center; transition:border-color .2s ease, transform .2s ease; }
+    .image-dropzone { position:relative; border:2px dashed #475569; border-radius:12px; padding:20px; background:#0f172a; cursor:pointer; text-align:center; transition:border-color .2s ease, transform .2s ease; overflow:hidden; }
     .image-dropzone.is-dragover { border-color:#f59e0b; transform:translateY(-1px); }
     .image-dropzone p { margin:6px 0; color:#cbd5e1; }
     .dropzone-hint { font-size:13px; color:#94a3b8; }
     .image-dropzone-preview { margin-top:12px; display:flex; justify-content:center; }
     .image-dropzone-preview img { max-height:160px; max-width:100%; border-radius:8px; object-fit:cover; }
+    .image-dropzone-input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
     .helper-text { display:block; margin-top:8px; color:#94a3b8; font-size:13px; }
     .form-actions { padding:0 30px 30px; display:flex; gap:12px; }
     .btn { display:inline-block; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:700; border:none; cursor:pointer; }
@@ -198,17 +202,18 @@ $bookings = getBookings($pdo);
           </div>
           <div class="form-group form-group-wide" style="grid-column:span 2;">
             <label for="image_file">Vehicle image</label>
-            <div id="image-dropzone" class="image-dropzone" tabindex="0" role="button" aria-label="Upload vehicle image">
-              <input id="image_file" name="image_file" type="file" accept="image/*" hidden>
+            <div id="image-dropzone" class="image-dropzone">
+              <input id="image_file" name="image_file" type="file" accept="image/*" class="image-dropzone-input" aria-label="Upload vehicle image">
               <p><strong>Drop an image here</strong> or click to browse</p>
               <p class="dropzone-hint">PNG, JPG, WEBP, SVG, or GIF up to 5MB</p>
+              <p id="image-dropzone-status" class="dropzone-hint" style="display:none;"></p>
               <div id="image-dropzone-preview" class="image-dropzone-preview"></div>
             </div>
             <small class="helper-text">You can also type a path manually if you already have an image. Uploading a file overrides the text path.</small>
           </div>
           <div class="form-group form-group-wide" style="grid-column:span 2;">
             <label for="image">Image path</label>
-            <input id="image" name="image" value="<?php echo htmlspecialchars($editVehicle['image'] ?? ''); ?>" placeholder="images/toyota.jpg">
+            <input id="image" name="image" value="<?php echo htmlspecialchars(normalizeVehicleImagePath($editVehicle['image'] ?? '')); ?>" placeholder="/frontend/images/toyota.jpg or https://example.com/car.jpg">
           </div>
           <div class="form-group form-group-wide" style="grid-column:span 2;">
             <label for="description">Details</label>
@@ -347,29 +352,27 @@ $bookings = getBookings($pdo);
       const preview = document.getElementById('image-dropzone-preview');
       const pathInput = document.getElementById('image');
 
-      if (!dropzone || !fileInput || !preview) {
+      if (!dropzone || !fileInput || !preview || !pathInput) {
         return;
       }
+
+      const status = document.getElementById('image-dropzone-status');
 
       const showSelectedFile = (file) => {
         preview.innerHTML = '';
         if (!file) {
+          if (status) { status.style.display = 'none'; status.textContent = ''; }
           return;
         }
-        const image = document.createElement('img');
-        image.src = URL.createObjectURL(file);
-        image.alt = file.name;
-        preview.appendChild(image);
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        img.alt = file.name;
+        preview.appendChild(img);
+        // Show filename in the dropzone; clear the manual path field so it
+        // doesn't produce a bogus path if the upload somehow fails.
+        if (status) { status.textContent = '\u2713 ' + file.name; status.style.display = ''; }
         pathInput.value = '';
       };
-
-      dropzone.addEventListener('click', () => fileInput.click());
-      dropzone.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          fileInput.click();
-        }
-      });
 
       ['dragenter', 'dragover'].forEach((eventName) => {
         dropzone.addEventListener(eventName, (event) => {
@@ -380,23 +383,20 @@ $bookings = getBookings($pdo);
 
       ['dragleave', 'dragend', 'drop'].forEach((eventName) => {
         dropzone.addEventListener(eventName, (event) => {
-          event.preventDefault();
+          if (eventName !== 'drop') {
+            event.preventDefault();
+          }
           dropzone.classList.remove('is-dragover');
         });
       });
 
-      dropzone.addEventListener('drop', (event) => {
-        const file = event.dataTransfer?.files?.[0];
-        if (file) {
-          showSelectedFile(file);
-          const dataTransfer = new DataTransfer();
-          dataTransfer.items.add(file);
-          fileInput.files = dataTransfer.files;
-        }
-      });
-
       fileInput.addEventListener('change', (event) => {
         showSelectedFile(event.target.files?.[0] || null);
+      });
+
+      // Some browsers do not fire change consistently on drop; keep this as a fallback.
+      fileInput.addEventListener('drop', () => {
+        setTimeout(() => showSelectedFile(fileInput.files?.[0] || null), 0);
       });
     })();
   </script>

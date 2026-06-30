@@ -22,19 +22,66 @@ function columnExists(PDO $pdo, string $table, string $column): bool
     return (int) $stmt->fetchColumn() > 0;
 }
 
+function indexExists(PDO $pdo, string $table, string $indexName): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?'
+    );
+    $stmt->execute([$table, $indexName]);
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+function uniqueIndexExistsForColumn(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?
+           AND COLUMN_NAME = ?
+           AND NON_UNIQUE = 0'
+    );
+    $stmt->execute([$table, $column]);
+    return (int) $stmt->fetchColumn() > 0;
+}
+
 function ensureDatabaseSchema(PDO $pdo): void
 {
-    $pdo->exec(
-        "CREATE TABLE IF NOT EXISTS users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            email VARCHAR(255) NOT NULL UNIQUE,
-            password VARCHAR(255) NOT NULL,
-            phone VARCHAR(50) DEFAULT NULL,
-            role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
-    );
+    if (!tableExists($pdo, 'users')) {
+        $pdo->exec(
+            "CREATE TABLE users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                phone_number VARCHAR(50) NOT NULL UNIQUE,
+                role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+    } else {
+        if (!uniqueIndexExistsForColumn($pdo, 'users', 'email')) {
+            $pdo->exec('ALTER TABLE users ADD UNIQUE KEY email (email)');
+        }
+
+        if (!columnExists($pdo, 'users', 'phone_number')) {
+            if (columnExists($pdo, 'users', 'phone')) {
+                $pdo->exec('ALTER TABLE users CHANGE COLUMN phone phone_number VARCHAR(50) DEFAULT NULL');
+            } else {
+                $pdo->exec('ALTER TABLE users ADD COLUMN phone_number VARCHAR(50) DEFAULT NULL AFTER password');
+            }
+        }
+
+        $pdo->exec("UPDATE users SET phone_number = CONCAT('migration-', id) WHERE phone_number IS NULL OR phone_number = ''");
+
+        if (!indexExists($pdo, 'users', 'phone_number')) {
+            $pdo->exec('ALTER TABLE users ADD UNIQUE KEY phone_number (phone_number)');
+        }
+
+        $pdo->exec('ALTER TABLE users MODIFY phone_number VARCHAR(50) NOT NULL');
+    }
 
     if (!tableExists($pdo, 'vehicles')) {
         $pdo->exec(
@@ -94,8 +141,8 @@ function ensureDatabaseSchema(PDO $pdo): void
 
     $adminPassword = '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa';
     $stmt = $pdo->prepare(
-        "INSERT INTO users (name, email, password, role)
-         SELECT 'Admin', 'admin@example.com', ?, 'admin'
+        "INSERT INTO users (name, email, password, phone_number, role)
+         SELECT 'Admin', 'admin@example.com', ?, '9000000000', 'admin'
          WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@example.com')"
     );
     $stmt->execute([$adminPassword]);

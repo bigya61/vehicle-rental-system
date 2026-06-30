@@ -45,7 +45,9 @@ $vehicleTypes = [
 
       <a href="#fleet">Fleet</a>
 
-      <a href="../backend/admin-login.php">Admin</a>
+      <?php if (!empty($_SESSION['admin'])): ?>
+        <a href="../backend/admin.php">Admin Dashboard</a>
+      <?php endif; ?>
 
       <?php if (!empty($_SESSION['user'])): ?>
         <a href="my-bookings.php">My Bookings</a>

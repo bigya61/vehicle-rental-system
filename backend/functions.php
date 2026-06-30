@@ -105,7 +105,7 @@ function restoreLoginFromCookie(PDO $pdo): void {
         'id' => $user['id'],
         'name' => $user['name'],
         'email' => $user['email'],
-        'phone' => $user['phone'],
+        'phone_number' => $user['phone_number'],
     ];
     if ($user['role'] === 'admin') {
         $_SESSION['admin'] = true;
@@ -150,23 +150,65 @@ function ensureVehicleAssetDirectory(): string {
     return $dir;
 }
 
+function normalizeVehicleImagePath(?string $image): string {
+    $image = trim((string) ($image ?? ''));
+    if ($image === '') {
+        return '';
+    }
+
+    if (preg_match('#^https?://#i', $image)) {
+        return $image;
+    }
+
+    $image = str_replace('\\', '/', $image);
+
+    $rewrites = [
+        '../backend/assets/' => '/backend/assets/',
+        'backend/assets/' => '/backend/assets/',
+        '../frontend/images/' => '/frontend/images/',
+        'frontend/images/' => '/frontend/images/',
+        'images/' => '/frontend/images/',
+    ];
+
+    foreach ($rewrites as $prefix => $replacement) {
+        if (str_starts_with($image, $prefix)) {
+            return $replacement . ltrim(substr($image, strlen($prefix)), '/');
+        }
+    }
+
+    if (str_starts_with($image, '/backend/assets/') || str_starts_with($image, '/frontend/images/')) {
+        return $image;
+    }
+
+    return '/' . ltrim($image, '/');
+}
+
+function isValidVehicleImageReference(?string $image): bool {
+    $image = normalizeVehicleImagePath($image);
+    if ($image === '') {
+        return true;
+    }
+
+    return (bool) preg_match('/\.(jpg|jpeg|png|webp|svg|gif)(\?.*)?$/i', $image);
+}
+
 function handleVehicleImageUpload(?array $file, ?string $existingImage = null): string {
     if (!is_array($file) || empty($file['tmp_name']) || !is_uploaded_file($file['tmp_name'])) {
-        return trim((string) ($existingImage ?? ''));
+        return normalizeVehicleImagePath($existingImage);
     }
 
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        return trim((string) ($existingImage ?? ''));
+        return normalizeVehicleImagePath($existingImage);
     }
 
     $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'svg', 'gif'];
     $extension = strtolower(pathinfo($file['name'] ?? '', PATHINFO_EXTENSION));
     if (!in_array($extension, $allowedExtensions, true)) {
-        return trim((string) ($existingImage ?? ''));
+        return normalizeVehicleImagePath($existingImage);
     }
 
     if (($file['size'] ?? 0) > 5 * 1024 * 1024) {
-        return trim((string) ($existingImage ?? ''));
+        return normalizeVehicleImagePath($existingImage);
     }
 
     $assetDir = ensureVehicleAssetDirectory();
@@ -180,10 +222,10 @@ function handleVehicleImageUpload(?array $file, ?string $existingImage = null): 
     $targetPath = $assetDir . '/' . $fileName;
 
     if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
-        return trim((string) ($existingImage ?? ''));
+        return normalizeVehicleImagePath($existingImage);
     }
 
-    return '../backend/assets/' . $fileName;
+    return '/backend/assets/' . $fileName;
 }
 
 function getVehicles(PDO $pdo) {
@@ -204,8 +246,10 @@ function getVehiclesByOwner(PDO $pdo, $owner_id) {
 }
 
 function vehicleImagePath(array $vehicle) {
-    $image = trim($vehicle['image'] ?? '');
-    return $image !== '' ? $image : 'images/placeholder.svg';
+    $image = normalizeVehicleImagePath($vehicle['image'] ?? '');
+    return $image !== '' && isValidVehicleImageReference($image)
+        ? $image
+        : '/frontend/images/placeholder.svg';
 }
 
 function createVehicle(PDO $pdo, $owner_id, $make, $model, $year, $price_per_day, $image, $description = null) {
@@ -233,14 +277,20 @@ function deleteVehicle(PDO $pdo, $id) {
     return $stmt->execute([$id]);
 }
 
-function createUser(PDO $pdo, $name, $email, $password, $phone = null, $role = 'user') {
-    $stmt = $pdo->prepare('INSERT INTO users (name, email, password, phone, role, created_at) VALUES (?, ?, ?, ?, ?, NOW())');
-    return $stmt->execute([$name, $email, $password, $phone, $role]);
+function createUser(PDO $pdo, $name, $email, $password, $phoneNumber, $role = 'user') {
+    $stmt = $pdo->prepare('INSERT INTO users (name, email, password, phone_number, role, created_at) VALUES (?, ?, ?, ?, ?, NOW())');
+    return $stmt->execute([$name, $email, $password, $phoneNumber, $role]);
 }
 
 function getUserByEmail(PDO $pdo, $email) {
     $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ?');
     $stmt->execute([$email]);
+    return $stmt->fetch();
+}
+
+function getUserByPhoneNumber(PDO $pdo, $phoneNumber) {
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE phone_number = ?');
+    $stmt->execute([$phoneNumber]);
     return $stmt->fetch();
 }
 

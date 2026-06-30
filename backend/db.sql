@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL UNIQUE,
   password VARCHAR(255) NOT NULL,
-  phone VARCHAR(50) DEFAULT NULL,
+  phone_number VARCHAR(50) NOT NULL UNIQUE,
   role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS bookings (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO users (name, email, password, role) VALUES
-('Admin', 'admin@example.com', '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa', 'admin');
+INSERT INTO users (name, email, password, phone_number, role) VALUES
+('Admin', 'admin@example.com', '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa', '9000000000', 'admin');
 
 INSERT INTO vehicles (owner_id, make, model, year, price_per_day, image) VALUES
 (1, 'Toyota', 'Corolla', 2019, 40.00, 'images/toyota-corolla.svg'),

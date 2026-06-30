@@ -1,15 +1,20 @@
 USE rentalsystem;
 
--- Create the users table for account ownership and booking relationships.
-CREATE TABLE IF NOT EXISTS users (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  email VARCHAR(255) NOT NULL UNIQUE,
-  password VARCHAR(255) NOT NULL,
-  phone VARCHAR(50) DEFAULT NULL,
-  role ENUM('user', 'admin') NOT NULL DEFAULT 'user',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Rename the old phone column to phone_number.
+ALTER TABLE users
+  CHANGE COLUMN phone phone_number VARCHAR(50) DEFAULT NULL;
+
+ALTER TABLE users
+  ADD UNIQUE KEY email (email);
+
+-- Backfill any missing values so the column can be made NOT NULL and UNIQUE.
+UPDATE users
+SET phone_number = CONCAT('migration-', id)
+WHERE phone_number IS NULL OR phone_number = '';
+
+ALTER TABLE users
+  MODIFY phone_number VARCHAR(50) NOT NULL,
+  ADD UNIQUE KEY phone_number (phone_number);
 
 -- Add owner relationship to vehicles.
 ALTER TABLE vehicles
@@ -22,8 +27,8 @@ ALTER TABLE bookings
   ADD CONSTRAINT IF NOT EXISTS fk_bookings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
 
 -- Seed an admin account if not already present.
-INSERT INTO users (name, email, password, role)
-SELECT 'Admin', 'admin@example.com', '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa', 'admin'
+INSERT INTO users (name, email, password, phone_number, role)
+SELECT 'Admin', 'admin@example.com', '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa', '9000000000', 'admin'
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@example.com');
 
 -- If vehicles exist before this migration, assign them to the admin account.
