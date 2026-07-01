@@ -10,6 +10,7 @@ if (empty($_SESSION['admin']) || $_SESSION['admin'] !== true) {
 $flash = '';
 $error = '';
 $editVehicle = null;
+$imageUploadLimitLabel = formatBytesHuman(vehicleImageUploadLimitBytes());
 
 if (!empty($_SESSION['flash'])) {
     $flash = $_SESSION['flash'];
@@ -56,26 +57,41 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehic
     $make = trim($_POST['make'] ?? '');
     $model = trim($_POST['model'] ?? '');
     $year = trim($_POST['year'] ?? '');
-    $price = trim($_POST['price_per_day'] ?? '');
+      $transmission = normalizeTransmission($_POST['transmission'] ?? 'automatic');
+      $price = trim($_POST['price_per_day'] ?? '');
     $image = normalizeVehicleImagePath($_POST['image'] ?? '');
     $description = trim($_POST['description'] ?? '');
-    $image = handleVehicleImageUpload($_FILES['image_file'] ?? null, $image);
+    $uploadError = $_FILES['image_file']['error'] ?? UPLOAD_ERR_NO_FILE;
+    $uploadAttempted = $uploadError !== UPLOAD_ERR_NO_FILE;
+    $uploadFailureReason = null;
+    $image = handleVehicleImageUpload($_FILES['image_file'] ?? null, $image, $uploadFailureReason);
 
     if ($make === '' || $model === '' || $price === '') {
         $error = 'make, model, and price are required.';
+      } elseif (!in_array($transmission, ['manual', 'automatic'], true)) {
+        $error = 'Transmission must be manual or automatic.';
+    } elseif ($uploadAttempted && $image === '') {
+      $specificReason = trim((string) ($uploadFailureReason ?? ''));
+      if ($specificReason !== '') {
+        $error = 'Image upload failed: ' . $specificReason;
+      } elseif ($uploadError !== UPLOAD_ERR_OK) {
+        $error = 'Image upload failed: ' . phpUploadErrorMessage((int) $uploadError);
+      } else {
+        $error = 'Image upload failed. Allowed types: JPG, JPEG, PNG, WEBP, SVG, GIF. Max file size: ' . $imageUploadLimitLabel . '.';
+      }
     } elseif (!is_numeric($price) || (float) $price < 0) {
         $error = 'Price must be a valid number.';
     } elseif (!isValidVehicleImageReference($image)) {
       $error = 'Image must be a direct image URL or a valid image path ending in jpg, jpeg, png, webp, svg, or gif.';
     } else {
         if ($vehicleId > 0) {
-            updateVehicle($pdo, $vehicleId, $make, $model, $year ?: null, $price, $image, $description ?: null);
+        updateVehicle($pdo, $vehicleId, $make, $model, $year ?: null, $transmission, $price, $image, $description ?: null);
             $_SESSION['flash'] = 'Vehicle updated successfully.';
         } else {
             $ownerId = !empty($_SESSION['user']['id'])
                 ? (int) $_SESSION['user']['id']
                 : (int) ($pdo->query("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
-            createVehicle($pdo, $ownerId, $make, $model, $year ?: null, $price, $image, $description ?: null);
+        createVehicle($pdo, $ownerId, $make, $model, $year ?: null, $transmission, $price, $image, $description ?: null);
             $_SESSION['flash'] = 'Vehicle added successfully.';
         }
         header('Location: admin.php');
@@ -112,7 +128,7 @@ $bookings = getBookings($pdo);
     .form-header h2, .table-header h2 { margin:0; }
     .form-body { padding:24px 30px; display:grid; grid-template-columns:1fr 1fr; gap:20px; }
     .form-group label { display:block; margin-bottom:8px; color:#9ca3af; }
-    .form-group input, .form-group textarea { width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; background:#0f172a; color:#e2e8f0; }
+    .form-group input, .form-group select, .form-group textarea { width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; background:#0f172a; color:#e2e8f0; }
     .image-dropzone { position:relative; border:2px dashed #475569; border-radius:12px; padding:20px; background:#0f172a; cursor:pointer; text-align:center; transition:border-color .2s ease, transform .2s ease; overflow:hidden; }
     .image-dropzone.is-dragover { border-color:#f59e0b; transform:translateY(-1px); }
     .image-dropzone p { margin:6px 0; color:#cbd5e1; }
@@ -197,6 +213,14 @@ $bookings = getBookings($pdo);
             <input id="year" name="year" type="number" min="1900" max="2100" value="<?php echo htmlspecialchars($editVehicle['year'] ?? ''); ?>">
           </div>
           <div class="form-group">
+            <label for="transmission">Transmission</label>
+            <?php $selectedTransmission = normalizeTransmission($editVehicle['transmission'] ?? 'automatic'); ?>
+            <select id="transmission" name="transmission">
+              <option value="automatic" <?php echo $selectedTransmission === 'automatic' ? 'selected' : ''; ?>>Automatic</option>
+              <option value="manual" <?php echo $selectedTransmission === 'manual' ? 'selected' : ''; ?>>Manual</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label for="price_per_day">Price per day</label>
             <input id="price_per_day" name="price_per_day" type="number" step="0.01" min="0" value="<?php echo htmlspecialchars($editVehicle['price_per_day'] ?? ''); ?>" required>
           </div>
@@ -205,7 +229,7 @@ $bookings = getBookings($pdo);
             <div id="image-dropzone" class="image-dropzone">
               <input id="image_file" name="image_file" type="file" accept="image/*" class="image-dropzone-input" aria-label="Upload vehicle image">
               <p><strong>Drop an image here</strong> or click to browse</p>
-              <p class="dropzone-hint">PNG, JPG, WEBP, SVG, or GIF up to 5MB</p>
+              <p class="dropzone-hint">PNG, JPG, WEBP, SVG, or GIF up to <?php echo htmlspecialchars($imageUploadLimitLabel); ?></p>
               <p id="image-dropzone-status" class="dropzone-hint" style="display:none;"></p>
               <div id="image-dropzone-preview" class="image-dropzone-preview"></div>
             </div>
@@ -301,6 +325,10 @@ $bookings = getBookings($pdo);
                 <th>Vehicle</th>
                 <th>Customer</th>
                 <th>Email</th>
+                <th>Phone</th>
+                <th>Drive mode</th>
+                <th>Rate / day</th>
+                <th>Total</th>
                 <th>Start</th>
                 <th>End</th>
                 <th>Status</th>
@@ -314,6 +342,10 @@ $bookings = getBookings($pdo);
                   <td><?php echo htmlspecialchars($booking['make'] . ' ' . $booking['model']); ?></td>
                   <td><?php echo htmlspecialchars($booking['name']); ?></td>
                   <td><?php echo htmlspecialchars($booking['email']); ?></td>
+                  <td><?php echo htmlspecialchars($booking['user_phone_number'] ?? '—'); ?></td>
+                  <td><?php echo htmlspecialchars(($booking['drive_mode'] ?? 'self_drive') === 'with_driver' ? 'With driver' : 'Self-drive'); ?></td>
+                  <td>NPR <?php echo htmlspecialchars(number_format((float) ($booking['daily_rate'] ?? 0), 0)); ?></td>
+                  <td>NPR <?php echo htmlspecialchars(number_format((float) ($booking['total_amount'] ?? 0), 0)); ?></td>
                   <td><?php echo htmlspecialchars($booking['start_date']); ?></td>
                   <td><?php echo htmlspecialchars($booking['end_date']); ?></td>
                   <td>
@@ -347,6 +379,10 @@ $bookings = getBookings($pdo);
   <footer class="page-footer">&copy; <?php echo date('Y'); ?> Vehicle Rental</footer>
   <script>
     (function () {
+      const maxUploadBytes = <?php echo (int) vehicleImageUploadLimitBytes(); ?>;
+      const maxUploadLabel = <?php echo json_encode($imageUploadLimitLabel, JSON_UNESCAPED_SLASHES); ?>;
+      const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'svg', 'gif'];
+
       const dropzone = document.getElementById('image-dropzone');
       const fileInput = document.getElementById('image_file');
       const preview = document.getElementById('image-dropzone-preview');
@@ -358,20 +394,53 @@ $bookings = getBookings($pdo);
 
       const status = document.getElementById('image-dropzone-status');
 
+      const setStatus = (text, isError = false) => {
+        if (!status) {
+          return;
+        }
+        status.textContent = text;
+        status.style.display = text ? '' : 'none';
+        status.style.color = isError ? '#fca5a5' : '';
+      };
+
+      const validateFile = (file) => {
+        if (!file) {
+          return { ok: false, message: 'No file selected.' };
+        }
+
+        const extension = file.name.includes('.')
+          ? file.name.split('.').pop().toLowerCase()
+          : '';
+
+        if (!allowedExtensions.includes(extension)) {
+          return {
+            ok: false,
+            message: 'Unsupported file type .' + (extension || 'unknown') + '. Allowed: JPG, JPEG, PNG, WEBP, SVG, GIF.'
+          };
+        }
+
+        if (maxUploadBytes > 0 && file.size > maxUploadBytes) {
+          return {
+            ok: false,
+            message: 'File is too large (' + Math.ceil(file.size / 1024) + ' KB). Max allowed is ' + maxUploadLabel + '.'
+          };
+        }
+
+        return { ok: true, message: '' };
+      };
+
       const showSelectedFile = (file) => {
         preview.innerHTML = '';
         if (!file) {
-          if (status) { status.style.display = 'none'; status.textContent = ''; }
+          setStatus('');
           return;
         }
         const img = document.createElement('img');
         img.src = URL.createObjectURL(file);
         img.alt = file.name;
         preview.appendChild(img);
-        // Show filename in the dropzone; clear the manual path field so it
-        // doesn't produce a bogus path if the upload somehow fails.
-        if (status) { status.textContent = '\u2713 ' + file.name; status.style.display = ''; }
-        pathInput.value = '';
+        // Show selected filename in the dropzone.
+        setStatus('\u2713 ' + file.name);
       };
 
       ['dragenter', 'dragover'].forEach((eventName) => {
@@ -383,15 +452,55 @@ $bookings = getBookings($pdo);
 
       ['dragleave', 'dragend', 'drop'].forEach((eventName) => {
         dropzone.addEventListener(eventName, (event) => {
-          if (eventName !== 'drop') {
-            event.preventDefault();
-          }
+          event.preventDefault();
           dropzone.classList.remove('is-dragover');
+
+          if (eventName === 'drop') {
+            const droppedFiles = event.dataTransfer?.files;
+            if (droppedFiles && droppedFiles.length > 0) {
+              let assigned = false;
+
+              try {
+                fileInput.files = droppedFiles;
+                assigned = fileInput.files && fileInput.files.length > 0;
+              } catch (_) {
+                assigned = false;
+              }
+
+              if (!assigned && typeof DataTransfer !== 'undefined') {
+                try {
+                  const transfer = new DataTransfer();
+                  transfer.items.add(droppedFiles[0]);
+                  fileInput.files = transfer.files;
+                  assigned = fileInput.files && fileInput.files.length > 0;
+                } catch (_) {
+                  assigned = false;
+                }
+              }
+
+              showSelectedFile(droppedFiles[0]);
+
+              if (!assigned) {
+                setStatus('Image preview loaded, but browser blocked attaching file input. Click and reselect to upload.', true);
+                return;
+              }
+
+              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }
         });
       });
 
       fileInput.addEventListener('change', (event) => {
-        showSelectedFile(event.target.files?.[0] || null);
+        const file = event.target.files?.[0] || null;
+        const check = validateFile(file);
+        if (!check.ok) {
+          preview.innerHTML = '';
+          setStatus(check.message, true);
+          event.target.value = '';
+          return;
+        }
+        showSelectedFile(file);
       });
 
       // Some browsers do not fire change consistently on drop; keep this as a fallback.

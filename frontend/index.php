@@ -167,6 +167,7 @@ $vehicleTypes = [
             */
 
             $img = vehicleImagePath($v);
+            $transmission = normalizeTransmission($v['transmission'] ?? 'automatic');
 
             ?>
 
@@ -202,7 +203,7 @@ $vehicleTypes = [
                 <p class="vehicle-meta">
 
                   <?php echo htmlspecialchars($v['year']); ?>
-                  · Automatic
+                  · <?php echo htmlspecialchars(ucfirst($transmission)); ?>
 
                 </p>
 

@@ -397,7 +397,8 @@ main {
   color: #cbd5e1;
   font-size: 0.95rem;
 }
-.form-group input {
+.form-group input,
+.form-group select {
   padding: 14px 16px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -406,6 +407,26 @@ main {
 }
 .form-group input::placeholder {
   color: #64748b;
+}
+.form-group select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 48px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #93c5fd 50%),
+    linear-gradient(135deg, #93c5fd 50%, transparent 50%);
+  background-position:
+    calc(100% - 22px) calc(50% - 3px),
+    calc(100% - 16px) calc(50% - 3px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.8);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 .total-row {
   display: flex;

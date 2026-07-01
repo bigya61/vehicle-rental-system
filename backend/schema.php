@@ -91,6 +91,7 @@ function ensureDatabaseSchema(PDO $pdo): void
                 make VARCHAR(100) NOT NULL,
                 model VARCHAR(100) NOT NULL,
                 year INT DEFAULT NULL,
+                transmission ENUM('manual', 'automatic') NOT NULL DEFAULT 'automatic',
                 price_per_day DECIMAL(8,2) DEFAULT 0.00,
                 image VARCHAR(255) DEFAULT NULL,
                 description TEXT DEFAULT NULL,
@@ -105,6 +106,9 @@ function ensureDatabaseSchema(PDO $pdo): void
         if (!columnExists($pdo, 'vehicles', 'image')) {
             $pdo->exec('ALTER TABLE vehicles ADD COLUMN image VARCHAR(255) DEFAULT NULL');
         }
+        if (!columnExists($pdo, 'vehicles', 'transmission')) {
+            $pdo->exec("ALTER TABLE vehicles ADD COLUMN transmission ENUM('manual', 'automatic') NOT NULL DEFAULT 'automatic' AFTER year");
+        }
         if (!columnExists($pdo, 'vehicles', 'description')) {
             $pdo->exec('ALTER TABLE vehicles ADD COLUMN description TEXT DEFAULT NULL');
         }
@@ -114,6 +118,8 @@ function ensureDatabaseSchema(PDO $pdo): void
         if (!columnExists($pdo, 'vehicles', 'created_at')) {
             $pdo->exec('ALTER TABLE vehicles ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
         }
+
+        $pdo->exec("UPDATE vehicles SET transmission = 'automatic' WHERE transmission IS NULL OR transmission NOT IN ('manual', 'automatic')");
     }
 
     if (!tableExists($pdo, 'bookings')) {
@@ -126,6 +132,9 @@ function ensureDatabaseSchema(PDO $pdo): void
                 email VARCHAR(255) NOT NULL,
                 start_date DATE NOT NULL,
                 end_date DATE NOT NULL,
+                drive_mode ENUM('self_drive', 'with_driver') NOT NULL DEFAULT 'self_drive',
+                daily_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
                 status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
@@ -137,6 +146,28 @@ function ensureDatabaseSchema(PDO $pdo): void
         if (!columnExists($pdo, 'bookings', 'status')) {
             $pdo->exec("ALTER TABLE bookings ADD COLUMN status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active'");
         }
+        if (!columnExists($pdo, 'bookings', 'drive_mode')) {
+            $pdo->exec("ALTER TABLE bookings ADD COLUMN drive_mode ENUM('self_drive', 'with_driver') NOT NULL DEFAULT 'self_drive' AFTER end_date");
+        }
+        if (!columnExists($pdo, 'bookings', 'daily_rate')) {
+            $pdo->exec('ALTER TABLE bookings ADD COLUMN daily_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER drive_mode');
+        }
+        if (!columnExists($pdo, 'bookings', 'total_amount')) {
+            $pdo->exec('ALTER TABLE bookings ADD COLUMN total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER daily_rate');
+        }
+
+        $pdo->exec("UPDATE bookings SET drive_mode = 'self_drive' WHERE drive_mode IS NULL OR drive_mode NOT IN ('self_drive', 'with_driver')");
+        $pdo->exec(
+            "UPDATE bookings b
+            JOIN vehicles v ON v.id = b.vehicle_id
+            SET b.daily_rate = v.price_per_day + CASE WHEN b.drive_mode = 'with_driver' THEN 2000 ELSE 0 END
+            WHERE b.daily_rate IS NULL OR b.daily_rate <= 0"
+        );
+        $pdo->exec(
+            "UPDATE bookings
+            SET total_amount = (GREATEST(DATEDIFF(end_date, start_date) + 1, 1) * daily_rate)
+            WHERE total_amount IS NULL OR total_amount <= 0"
+        );
     }
 
     $adminPassword = '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa';
@@ -156,15 +187,15 @@ function ensureDatabaseSchema(PDO $pdo): void
     $vehicleCount = (int) $pdo->query('SELECT COUNT(*) FROM vehicles')->fetchColumn();
     if ($vehicleCount === 0 && $adminId > 0) {
         $stmt = $pdo->prepare(
-            'INSERT INTO vehicles (owner_id, make, model, year, price_per_day, image) VALUES
-             (?, ?, ?, ?, ?, ?),
-             (?, ?, ?, ?, ?, ?),
-             (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO vehicles (owner_id, make, model, year, transmission, price_per_day, image) VALUES
+             (?, ?, ?, ?, ?, ?, ?),
+             (?, ?, ?, ?, ?, ?, ?),
+             (?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
-            $adminId, 'Toyota', 'Corolla', 2019, 4000.00, 'images/toyota.jpg',
-            $adminId, 'Honda', 'Civic', 2020, 4500.00, 'images/honda.jpg',
-            $adminId, 'Ford', 'Escape', 2018, 5500.00, 'images/ford.jpg',
+            $adminId, 'Toyota', 'Corolla', 2019, 'automatic', 4000.00, 'images/toyota.jpg',
+            $adminId, 'Honda', 'Civic', 2020, 'manual', 4500.00, 'images/honda.jpg',
+            $adminId, 'Ford', 'Escape', 2018, 'automatic', 5500.00, 'images/ford.jpg',
         ]);
     }
 

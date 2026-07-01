@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   make VARCHAR(100) NOT NULL,
   model VARCHAR(100) NOT NULL,
   year INT DEFAULT NULL,
+  transmission ENUM('manual', 'automatic') NOT NULL DEFAULT 'automatic',
   price_per_day DECIMAL(8,2) DEFAULT 0.00,
   image VARCHAR(255) DEFAULT NULL,
   description TEXT DEFAULT NULL,
@@ -34,6 +35,9 @@ CREATE TABLE IF NOT EXISTS bookings (
   email VARCHAR(255) NOT NULL,
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
+  drive_mode ENUM('self_drive', 'with_driver') NOT NULL DEFAULT 'self_drive',
+  daily_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
@@ -43,7 +47,7 @@ CREATE TABLE IF NOT EXISTS bookings (
 INSERT INTO users (name, email, password, phone_number, role) VALUES
 ('Admin', 'admin@example.com', '$2y$10$mjNpkDAzWr417cRyWS2as.N1pPL5xLQupISxJg.Djz9dvLTbBVoVa', '9000000000', 'admin');
 
-INSERT INTO vehicles (owner_id, make, model, year, price_per_day, image) VALUES
-(1, 'Toyota', 'Corolla', 2019, 40.00, 'images/toyota-corolla.svg'),
-(1, 'Honda', 'Civic', 2020, 45.00, 'images/honda-civic.svg'),
-(1, 'Ford', 'Escape', 2018, 55.00, 'images/ford-escape.svg');
+INSERT INTO vehicles (owner_id, make, model, year, transmission, price_per_day, image) VALUES
+(1, 'Toyota', 'Corolla', 2019, 'automatic', 40.00, 'images/toyota-corolla.svg'),
+(1, 'Honda', 'Civic', 2020, 'manual', 45.00, 'images/honda-civic.svg'),
+(1, 'Ford', 'Escape', 2018, 'automatic', 55.00, 'images/ford-escape.svg');

@@ -74,6 +74,14 @@ $bookings = getBookingsByUser($pdo, (int) $_SESSION['user']['id']);
           <div class="booking">
             <h4><?php echo htmlspecialchars($b['make'] . ' ' . $b['model']); ?></h4>
             <p class="small-muted">From <?php echo htmlspecialchars($b['start_date']); ?> to <?php echo htmlspecialchars($b['end_date']); ?> — created <?php echo htmlspecialchars($b['created_at']); ?></p>
+            <p class="small-muted">
+              <?php $driveModeLabel = (($b['drive_mode'] ?? 'self_drive') === 'with_driver') ? 'With driver' : 'Self-drive'; ?>
+              <?php echo htmlspecialchars($driveModeLabel); ?>
+              &middot;
+              NPR <?php echo htmlspecialchars(number_format((float) ($b['daily_rate'] ?? 0), 0)); ?>/day
+              &middot;
+              Total NPR <?php echo htmlspecialchars(number_format((float) ($b['total_amount'] ?? 0), 0)); ?>
+            </p>
             <p><?php echo htmlspecialchars($b['name']); ?> &middot; <?php echo htmlspecialchars($b['email']); ?></p>
             <?php if (($b['status'] ?? 'active') !== 'cancelled'): ?>
               <form method="post" action="my-bookings.php" onsubmit="return confirm('Cancel this booking?');">
