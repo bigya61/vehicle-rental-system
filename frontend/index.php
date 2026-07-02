@@ -3,11 +3,6 @@ require_once __DIR__ . '/../backend/functions.php';
 
 $vehicles = getVehicles($pdo);
 
-$vehicleTypes = [
-    1 => 'Sports',
-    2 => 'SUV',
-    3 => 'Sedan',
-];
 ?>
 
 <!doctype html>
@@ -69,6 +64,17 @@ $vehicleTypes = [
         <a href="login.php">Login</a>
 
       <?php endif; ?>
+
+      <form class="header-search" method="get" action="<?php echo htmlspecialchars(appBaseUrl() . '/frontend/search.php'); ?>" role="search">
+        <input
+          type="search"
+          name="q"
+          placeholder="Search car name"
+          value="<?php echo htmlspecialchars($_GET['q'] ?? ''); ?>"
+          aria-label="Search vehicles"
+        >
+        <button type="submit">Search</button>
+      </form>
 
     </nav>
 
@@ -179,12 +185,6 @@ $vehicleTypes = [
                   src="<?php echo htmlspecialchars($img); ?>"
                   alt="<?php echo htmlspecialchars($v['make'] . ' ' . $v['model']); ?>"
                 >
-
-                <span class="vehicle-tag">
-
-                  <?php echo htmlspecialchars($vehicleTypes[$v['id']] ?? 'Vehicle'); ?>
-
-                </span>
 
                 <?php if (isVehicleBooked($v)): ?>
                   <span class="vehicle-tag" style="left:auto;right:12px;background:#dc2626;color:#fff;">Booked</span>

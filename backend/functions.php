@@ -420,6 +420,25 @@ function getVehicles(PDO $pdo) {
     return $stmt->fetchAll();
 }
 
+function searchVehicles(PDO $pdo, string $query) {
+    $query = trim(preg_replace('/\s+/', ' ', $query));
+    if ($query === '') {
+        return [];
+    }
+
+    $searchTerm = '%' . strtolower($query) . '%';
+
+    $stmt = $pdo->prepare(
+        'SELECT v.*, u.name AS owner_name, u.email AS owner_email
+         FROM vehicles v
+         LEFT JOIN users u ON v.owner_id = u.id
+         WHERE LOWER(TRIM(CONCAT(COALESCE(v.make, \'\'), \' \', COALESCE(v.model, \'\')))) LIKE :term
+         ORDER BY v.id'
+    );
+    $stmt->execute(['term' => $searchTerm]);
+    return $stmt->fetchAll();
+}
+
 function getVehicle(PDO $pdo, $id) {
     $stmt = $pdo->prepare('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id WHERE v.id = ?');
     $stmt->execute([$id]);

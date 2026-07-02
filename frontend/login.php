@@ -90,6 +90,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     <h1>Vehicle Rental</h1>
     <nav>
       <a href="index.php">Home</a>
+      <form class="header-search" method="get" action="<?php echo htmlspecialchars(appBaseUrl() . '/frontend/search.php'); ?>" role="search">
+        <input
+          type="search"
+          name="q"
+          placeholder="Search car name"
+          aria-label="Search vehicles"
+        >
+        <button type="submit">Search</button>
+      </form>
     </nav>
   </header>
 
