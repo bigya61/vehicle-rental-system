@@ -17,15 +17,18 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['cancel_boo
     }
     $bookingId = (int) $_POST['cancel_booking'];
     if ($bookingId > 0) {
-        $stmt = $pdo->prepare('SELECT user_id FROM bookings WHERE id = ? LIMIT 1');
+      $stmt = $pdo->prepare('SELECT id, user_id, status, created_at FROM bookings WHERE id = ? LIMIT 1');
         $stmt->execute([$bookingId]);
-        $ownerId = (int) $stmt->fetchColumn();
-        if ($ownerId === (int) $_SESSION['user']['id']) {
-            if (cancelBooking($pdo, $bookingId)) {
-                $message = 'Booking cancelled successfully.';
-            } else {
-                $error = 'Unable to cancel booking.';
-            }
+      $bookingRow = $stmt->fetch();
+      $ownerId = (int) ($bookingRow['user_id'] ?? 0);
+      if ($ownerId === (int) $_SESSION['user']['id']) {
+        if (!canCustomerCancelBooking((array) $bookingRow)) {
+          $error = 'Cancellation is allowed only within 24 hours from booking time.';
+        } elseif (cancelBooking($pdo, $bookingId)) {
+          $message = 'Booking cancelled successfully.';
+        } else {
+          $error = 'Unable to cancel booking.';
+        }
         } else {
             $error = 'Unauthorized to cancel this booking.';
         }
@@ -33,18 +36,49 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['cancel_boo
 }
 
 $bookings = getBookingsByUser($pdo, (int) $_SESSION['user']['id']);
+$todayDate = new DateTimeImmutable('today');
+
+function bookingTimelineStatus(array $booking, ?DateTimeImmutable $today = null): string
+{
+  $rawStatus = strtolower((string) ($booking['status'] ?? 'active'));
+  if ($rawStatus === 'cancelled') {
+    return 'cancelled';
+  }
+
+  $startDate = DateTimeImmutable::createFromFormat('Y-m-d', (string) ($booking['start_date'] ?? ''));
+  $endDate = DateTimeImmutable::createFromFormat('Y-m-d', (string) ($booking['end_date'] ?? ''));
+  if (!$startDate || !$endDate) {
+    return 'running';
+  }
+
+  $todayRef = $today ?? new DateTimeImmutable('today');
+  $start = $startDate->setTime(0, 0, 0);
+  $end = $endDate->setTime(0, 0, 0);
+
+  if ($end < $todayRef) {
+    return 'completed';
+  }
+  if ($start <= $todayRef && $end >= $todayRef) {
+    return 'running';
+  }
+
+  return 'upcoming';
+}
 
 $totalBookings = count($bookings);
-$activeBookings = 0;
+$runningBookings = 0;
+$completedBookings = 0;
 $cancelledBookings = 0;
 $totalSpent = 0.0;
 
 foreach ($bookings as $booking) {
-    $status = strtolower((string) ($booking['status'] ?? 'active'));
-    if ($status === 'cancelled') {
-        $cancelledBookings++;
-    } else {
-        $activeBookings++;
+  $timelineStatus = bookingTimelineStatus((array) $booking, $todayDate);
+  if ($timelineStatus === 'cancelled') {
+    $cancelledBookings++;
+  } elseif ($timelineStatus === 'completed') {
+    $completedBookings++;
+  } elseif ($timelineStatus === 'running') {
+    $runningBookings++;
     }
     $totalSpent += (float) ($booking['total_amount'] ?? 0);
 }
@@ -65,6 +99,68 @@ function formatBookingDate(string $dateValue): string
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>My Bookings - Vehicle Rental</title>
   <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .booking-status--running {
+      background: #16a34a;
+      color: #ecfdf5;
+    }
+    .booking-status--completed {
+      background: #1d4ed8;
+      color: #dbeafe;
+    }
+    .bookings-history {
+      margin-top: 24px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 16px;
+    }
+    .bookings-history h3 {
+      margin: 0 0 12px;
+      color: #e2e8f0;
+    }
+    .bookings-history-table {
+      width: 100%;
+      border-collapse: collapse;
+      color: #cbd5e1;
+      font-size: 0.95rem;
+    }
+    .bookings-history-table th,
+    .bookings-history-table td {
+      border-bottom: 1px solid #334155;
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .bookings-history-table th {
+      color: #f8fafc;
+      font-weight: 600;
+    }
+    .bookings-history-status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .bookings-history-status--running {
+      background: #166534;
+      color: #dcfce7;
+    }
+    .bookings-history-status--completed {
+      background: #1e3a8a;
+      color: #dbeafe;
+    }
+    .bookings-history-status--cancelled {
+      background: #7f1d1d;
+      color: #fecaca;
+    }
+    .bookings-history-status--upcoming {
+      background: #713f12;
+      color: #fef3c7;
+    }
+  </style>
 </head>
 <body>
   <header class="page-header">
@@ -107,8 +203,12 @@ function formatBookingDate(string $dateValue): string
           <p class="bookings-summary-value"><?php echo htmlspecialchars((string) $totalBookings); ?></p>
         </article>
         <article class="bookings-summary-card">
-          <p class="bookings-summary-label">Active</p>
-          <p class="bookings-summary-value bookings-summary-value--active"><?php echo htmlspecialchars((string) $activeBookings); ?></p>
+          <p class="bookings-summary-label">Running</p>
+          <p class="bookings-summary-value bookings-summary-value--active"><?php echo htmlspecialchars((string) $runningBookings); ?></p>
+        </article>
+        <article class="bookings-summary-card">
+          <p class="bookings-summary-label">Completed</p>
+          <p class="bookings-summary-value"><?php echo htmlspecialchars((string) $completedBookings); ?></p>
         </article>
         <article class="bookings-summary-card">
           <p class="bookings-summary-label">Cancelled</p>
@@ -137,9 +237,19 @@ function formatBookingDate(string $dateValue): string
         <div class="bookings-list">
           <?php foreach ($bookings as $b): ?>
             <?php
-              $status = strtolower((string) ($b['status'] ?? 'active'));
-              $isCancelled = $status === 'cancelled';
+              $timelineStatus = bookingTimelineStatus((array) $b, $todayDate);
+              $isCancelled = $timelineStatus === 'cancelled';
+              $isCompleted = $timelineStatus === 'completed';
+              $canCancel = canCustomerCancelBooking((array) $b);
               $driveModeLabel = (($b['drive_mode'] ?? 'self_drive') === 'with_driver') ? 'With driver' : 'Self-drive';
+              $statusClass = 'booking-status--active';
+              if ($timelineStatus === 'cancelled') {
+                $statusClass = 'booking-status--cancelled';
+              } elseif ($timelineStatus === 'completed') {
+                $statusClass = 'booking-status--completed';
+              } elseif ($timelineStatus === 'running') {
+                $statusClass = 'booking-status--running';
+              }
             ?>
             <article class="booking-card">
               <div class="booking-card-accent <?php echo $isCancelled ? 'booking-card-accent--cancelled' : 'booking-card-accent--active'; ?>"></div>
@@ -150,8 +260,8 @@ function formatBookingDate(string $dateValue): string
                     <?php echo htmlspecialchars($driveModeLabel); ?> booking
                   </p>
                 </div>
-                <span class="booking-status <?php echo $isCancelled ? 'booking-status--cancelled' : 'booking-status--active'; ?>">
-                  <?php echo $isCancelled ? 'Cancelled' : 'Active'; ?>
+                <span class="booking-status <?php echo $statusClass; ?>">
+                  <?php echo htmlspecialchars(ucfirst($timelineStatus)); ?>
                 </span>
               </div>
 
@@ -184,16 +294,57 @@ function formatBookingDate(string $dateValue): string
                 <?php echo htmlspecialchars($b['email']); ?>
               </p>
 
-              <?php if (!$isCancelled): ?>
+              <?php if (!$isCancelled && !$isCompleted && $canCancel): ?>
                 <form class="booking-card-actions" method="post" action="my-bookings.php" onsubmit="return confirm('Cancel this booking?');">
                   <?php echo csrfField(); ?>
                   <input type="hidden" name="cancel_booking" value="<?php echo (int) $b['id']; ?>">
                   <button type="submit" class="booking-cancel-btn">Cancel booking</button>
                 </form>
+              <?php elseif (!$isCancelled && !$isCompleted): ?>
+                <p class="booking-card-user" style="margin-top:8px;color:#b91c1c;">
+                  Cancellation closed. You can cancel only within 24 hours from booking time.
+                </p>
+              <?php elseif ($isCompleted): ?>
+                <p class="booking-card-user" style="margin-top:8px;color:#1d4ed8;">
+                  Trip completed.
+                </p>
               <?php endif; ?>
             </article>
           <?php endforeach; ?>
         </div>
+
+        <section class="bookings-history">
+          <h3>Booking History</h3>
+          <table class="bookings-history-table">
+            <thead>
+              <tr>
+                <th>Car</th>
+                <th>Booked Dates</th>
+                <th>Booked On</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($bookings as $b): ?>
+                <?php $timelineStatus = bookingTimelineStatus((array) $b, $todayDate); ?>
+                <tr>
+                  <td><?php echo htmlspecialchars($b['make'] . ' ' . $b['model']); ?></td>
+                  <td>
+                    <?php echo htmlspecialchars((string) ($b['start_date'] ?? '')); ?>
+                    to
+                    <?php echo htmlspecialchars((string) ($b['end_date'] ?? '')); ?>
+                  </td>
+                  <td><?php echo htmlspecialchars((string) date('Y-m-d', strtotime((string) ($b['created_at'] ?? 'now')))); ?></td>
+                  <td>
+                    <span class="bookings-history-status bookings-history-status--<?php echo htmlspecialchars($timelineStatus); ?>">
+                      <?php echo htmlspecialchars($timelineStatus); ?>
+                    </span>
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </section>
       <?php endif; ?>
     </section>
   </main>

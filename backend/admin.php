@@ -44,6 +44,23 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['cancel_boo
     exit;
 }
 
+  if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['release_vehicle'])) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+      http_response_code(400);
+      exit('Invalid CSRF token.');
+    }
+
+    $vehicleId = (int) $_POST['release_vehicle'];
+    if ($vehicleId > 0 && adminReleaseVehicle($pdo, $vehicleId)) {
+      $_SESSION['flash'] = 'Vehicle set to available and active bookings cancelled.';
+    } else {
+      $_SESSION['flash'] = 'Unable to set vehicle to available.';
+    }
+
+    header('Location: admin.php');
+    exit;
+  }
+
 if (isset($_GET['edit'])) {
     $editVehicle = getVehicle($pdo, (int) $_GET['edit']);
 }
@@ -297,6 +314,13 @@ $bookings = getBookings($pdo);
                   <td><?php echo htmlspecialchars($vehicle['image']); ?></td>
                   <td>
                     <a class="action-link" href="admin.php?edit=<?php echo (int) $vehicle['id']; ?>">Edit</a>
+                    <?php if (isVehicleBooked($vehicle)): ?>
+                      <form method="post" action="admin.php" style="display:inline;" onsubmit="return confirm('Set this vehicle to available and cancel its active bookings?');">
+                        <?php echo csrfField(); ?>
+                        <input type="hidden" name="release_vehicle" value="<?php echo (int) $vehicle['id']; ?>">
+                        <button type="submit" class="action-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;color:#34d399;">Set available</button>
+                      </form>
+                    <?php endif; ?>
                     <form method="post" action="admin.php" style="display:inline;" onsubmit="return confirm('Delete this vehicle?');">
                       <?php echo csrfField(); ?>
                       <input type="hidden" name="delete_vehicle" value="<?php echo (int) $vehicle['id']; ?>">

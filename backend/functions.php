@@ -523,6 +523,108 @@ function isVehicleBooked(array $vehicle): bool {
     return ($vehicle['status'] ?? 'available') === 'booked';
 }
 
+/**
+ * Returns active booked date ranges for a vehicle.
+ */
+function getVehicleBookedDateRanges(PDO $pdo, int $vehicleId): array {
+    $stmt = $pdo->prepare(
+        "SELECT start_date, end_date
+         FROM bookings
+         WHERE vehicle_id = ?
+           AND status = 'active'
+           AND end_date >= CURDATE()
+         ORDER BY start_date ASC"
+    );
+    $stmt->execute([$vehicleId]);
+
+    $ranges = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $ranges[] = [
+            'from' => (string) $row['start_date'],
+            'to' => (string) $row['end_date'],
+        ];
+    }
+
+    return $ranges;
+}
+
+/**
+ * Returns active booking date ranges for a vehicle including booking owner.
+ */
+function getVehicleBookedDateRangesDetailed(PDO $pdo, int $vehicleId): array {
+    $stmt = $pdo->prepare(
+        "SELECT id, user_id, start_date, end_date
+         FROM bookings
+         WHERE vehicle_id = ?
+           AND status = 'active'
+           AND end_date >= CURDATE()
+         ORDER BY start_date ASC"
+    );
+    $stmt->execute([$vehicleId]);
+
+    $ranges = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $ranges[] = [
+            'booking_id' => (int) $row['id'],
+            'user_id' => !empty($row['user_id']) ? (int) $row['user_id'] : null,
+            'from' => (string) $row['start_date'],
+            'to' => (string) $row['end_date'],
+        ];
+    }
+
+    return $ranges;
+}
+
+function getActiveBookingByUserAndVehicle(PDO $pdo, int $userId, int $vehicleId): ?array {
+    $stmt = $pdo->prepare(
+        "SELECT *
+         FROM bookings
+         WHERE user_id = ?
+           AND vehicle_id = ?
+           AND status = 'active'
+           AND end_date >= CURDATE()
+         ORDER BY start_date ASC
+         LIMIT 1"
+    );
+    $stmt->execute([$userId, $vehicleId]);
+    $booking = $stmt->fetch();
+    return $booking ?: null;
+}
+
+/**
+ * Returns true when the requested date range does not overlap active bookings.
+ */
+function isVehicleDateRangeAvailable(PDO $pdo, int $vehicleId, string $startDate, string $endDate): bool {
+    return isVehicleDateRangeAvailableExcludingBooking($pdo, $vehicleId, $startDate, $endDate, null);
+}
+
+/**
+ * Returns true when requested date range does not overlap active bookings,
+ * optionally excluding one booking id (used when rescheduling that booking).
+ */
+function isVehicleDateRangeAvailableExcludingBooking(PDO $pdo, int $vehicleId, string $startDate, string $endDate, ?int $excludeBookingId): bool {
+    $sql = "SELECT 1
+         FROM bookings
+         WHERE vehicle_id = ?
+           AND status = 'active'
+           AND start_date <= ?
+           AND end_date >= ?";
+    $params = [$vehicleId, $endDate, $startDate];
+
+    if ($excludeBookingId !== null && $excludeBookingId > 0) {
+        $sql .= ' AND id <> ?';
+        $params[] = $excludeBookingId;
+    }
+
+    $sql .= ' LIMIT 1';
+
+    $stmt = $pdo->prepare(
+        $sql
+    );
+    $stmt->execute($params);
+    return $stmt->fetchColumn() === false;
+}
+
 function deleteVehicle(PDO $pdo, $id) {
     $stmt = $pdo->prepare('DELETE FROM vehicles WHERE id = ?');
     return $stmt->execute([$id]);
@@ -582,9 +684,9 @@ function syncVehicleAvailability(PDO $pdo): void {
 }
 
 /**
- * Books a vehicle atomically. Only succeeds if the vehicle is currently
- * 'available'; marks it 'booked' in the same transaction to avoid double
- * booking. Returns true on success, false if already booked / missing.
+ * Books a vehicle atomically. Supports multiple future bookings for the same
+ * vehicle as long as requested dates do not overlap active bookings.
+ * Returns true on success, false if the vehicle is missing or dates conflict.
  */
 function createBooking(PDO $pdo, $vehicle_id, $user_id, $name, $email, $start_date, $end_date, $drive_mode = 'self_drive', $daily_rate = null, $total_amount = null) {
     syncVehicleAvailability($pdo);
@@ -595,9 +697,23 @@ function createBooking(PDO $pdo, $vehicle_id, $user_id, $name, $email, $start_da
         $lock = $pdo->prepare('SELECT status, price_per_day FROM vehicles WHERE id = ? FOR UPDATE');
         $lock->execute([$vehicle_id]);
         $vehicle = $lock->fetch();
-        $status = $vehicle['status'] ?? false;
+        if (!$vehicle) {
+            $pdo->rollBack();
+            return false;
+        }
 
-        if ($status === false || $status === 'booked') {
+        $overlapCheck = $pdo->prepare(
+            "SELECT id
+             FROM bookings
+             WHERE vehicle_id = ?
+               AND status = 'active'
+               AND start_date <= ?
+               AND end_date >= ?
+             LIMIT 1
+             FOR UPDATE"
+        );
+        $overlapCheck->execute([$vehicle_id, $end_date, $start_date]);
+        if ($overlapCheck->fetch()) {
             $pdo->rollBack();
             return false;
         }
@@ -649,7 +765,7 @@ function cancelBooking(PDO $pdo, $booking_id) {
         }
 
         $pdo->prepare('UPDATE bookings SET status = \'cancelled\' WHERE id = ?')->execute([$booking_id]);
-        $pdo->prepare('UPDATE vehicles SET status = \'available\' WHERE id = ?')->execute([$booking['vehicle_id']]);
+        syncVehicleAvailability($pdo);
 
         $pdo->commit();
         return true;
@@ -659,6 +775,120 @@ function cancelBooking(PDO $pdo, $booking_id) {
         }
         throw $e;
     }
+}
+
+/**
+ * Admin action: release a booked vehicle by cancelling its active bookings and
+ * forcing vehicle status to available.
+ */
+function adminReleaseVehicle(PDO $pdo, int $vehicleId): bool {
+    if ($vehicleId <= 0) {
+        return false;
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $vehicleStmt = $pdo->prepare('SELECT id FROM vehicles WHERE id = ? FOR UPDATE');
+        $vehicleStmt->execute([$vehicleId]);
+        $vehicle = $vehicleStmt->fetch();
+        if (!$vehicle) {
+            $pdo->rollBack();
+            return false;
+        }
+
+        $cancelStmt = $pdo->prepare("UPDATE bookings SET status = 'cancelled' WHERE vehicle_id = ? AND status = 'active'");
+        $cancelStmt->execute([$vehicleId]);
+
+        $availableStmt = $pdo->prepare("UPDATE vehicles SET status = 'available' WHERE id = ?");
+        $availableStmt->execute([$vehicleId]);
+
+        $pdo->commit();
+        return true;
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/**
+ * Reschedules a customer's own active booking if pickup is more than 24 hours
+ * away and target dates do not overlap other active bookings for that vehicle.
+ */
+function rescheduleCustomerBooking(PDO $pdo, int $bookingId, int $userId, string $startDate, string $endDate): bool {
+    try {
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare('SELECT id, user_id, vehicle_id, status, start_date, daily_rate, drive_mode, created_at FROM bookings WHERE id = ? FOR UPDATE');
+        $stmt->execute([$bookingId]);
+        $booking = $stmt->fetch();
+
+        if (!$booking || (int) ($booking['user_id'] ?? 0) !== $userId) {
+            $pdo->rollBack();
+            return false;
+        }
+
+        if (!canCustomerCancelBooking((array) $booking)) {
+            $pdo->rollBack();
+            return false;
+        }
+
+        $vehicleId = (int) $booking['vehicle_id'];
+        if (!isVehicleDateRangeAvailableExcludingBooking($pdo, $vehicleId, $startDate, $endDate, $bookingId)) {
+            $pdo->rollBack();
+            return false;
+        }
+
+        $startDateObj = DateTimeImmutable::createFromFormat('Y-m-d', $startDate);
+        $endDateObj = DateTimeImmutable::createFromFormat('Y-m-d', $endDate);
+        $durationDays = 1;
+        if ($startDateObj && $endDateObj) {
+            $durationDays = max((int) $startDateObj->diff($endDateObj)->format('%a') + 1, 1);
+        }
+
+        $dailyRate = max((float) ($booking['daily_rate'] ?? 0), 0);
+        $totalAmount = $dailyRate * $durationDays;
+
+        $update = $pdo->prepare('UPDATE bookings SET start_date = ?, end_date = ?, total_amount = ? WHERE id = ?');
+        $update->execute([$startDate, $endDate, $totalAmount, $bookingId]);
+
+        syncVehicleAvailability($pdo);
+
+        $pdo->commit();
+        return true;
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/**
+ * Customer can cancel only within 24 hours from booking creation time.
+ */
+function canCustomerCancelBooking(array $booking, ?DateTimeImmutable $now = null): bool {
+    if (strtolower((string) ($booking['status'] ?? 'active')) === 'cancelled') {
+        return false;
+    }
+
+    $createdRaw = trim((string) ($booking['created_at'] ?? ''));
+    if ($createdRaw === '') {
+        return false;
+    }
+
+    try {
+        $createdAt = new DateTimeImmutable($createdRaw);
+    } catch (Throwable $e) {
+        return false;
+    }
+
+    $cutoff = $createdAt->modify('+24 hours');
+    $currentTime = $now ?? new DateTimeImmutable('now');
+
+    return $currentTime <= $cutoff;
 }
 
 function getBookings(PDO $pdo) {

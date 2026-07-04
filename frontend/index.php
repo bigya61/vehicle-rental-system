@@ -187,7 +187,7 @@ $vehicles = getVehicles($pdo);
                 >
 
                 <?php if (isVehicleBooked($v)): ?>
-                  <span class="vehicle-tag" style="left:auto;right:12px;background:#dc2626;color:#fff;">Booked</span>
+                  <span class="vehicle-tag" style="left:auto;right:12px;background:#d97706;color:#fff;">Some dates unavailable</span>
                 <?php endif; ?>
 
               </div>
@@ -217,22 +217,12 @@ $vehicles = getVehicles($pdo);
 
                   </p>
 
-                  <?php if (isVehicleBooked($v)): ?>
-                    <span
-                      class="btn btn-small"
-                      style="background:#374151;color:#9ca3af;cursor:not-allowed;"
-                      aria-disabled="true"
-                    >
-                      Booked
-                    </span>
-                  <?php else: ?>
-                    <a
-                      class="btn btn-primary btn-small"
-                      href="book.php?vehicle_id=<?php echo $v['id']; ?>"
-                    >
-                      Book now
-                    </a>
-                  <?php endif; ?>
+                  <a
+                    class="btn btn-primary btn-small"
+                    href="book.php?vehicle_id=<?php echo $v['id']; ?>"
+                  >
+                    Book now
+                  </a>
 
                 </div>
 

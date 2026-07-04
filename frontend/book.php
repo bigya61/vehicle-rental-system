@@ -20,7 +20,15 @@ $today = new DateTimeImmutable('today');
 $minimumBookingDate = $today->modify('+1 day');
 $minimumBookingDateValue = $minimumBookingDate->format('Y-m-d');
 $driverSurchargePerDay = 2000;
-$selectedDriveMode = normalizeDriveMode($_POST['drive_mode'] ?? 'self_drive');
+$currentUserId = (int) $_SESSION['user']['id'];
+
+$activeVehicleId = (int) ($_POST['vehicle_id'] ?? $_GET['vehicle_id'] ?? 0);
+$existingUserBooking = null;
+if ($activeVehicleId > 0) {
+  $existingUserBooking = getActiveBookingByUserAndVehicle($pdo, $currentUserId, $activeVehicleId);
+}
+
+$selectedDriveMode = normalizeDriveMode($_POST['drive_mode'] ?? ($existingUserBooking['drive_mode'] ?? 'self_drive'));
 
 $vehicleTypes = [
     1 => 'Sports',
@@ -42,6 +50,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     }
 
     $vehicle_id = (int)($_POST['vehicle_id'] ?? 0);
+    $booking_id = (int)($_POST['booking_id'] ?? 0);
 
     $name = trim($_POST['name'] ?? '');
     $email = trim($_POST['email'] ?? '');
@@ -57,6 +66,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
     $userId = !empty($_SESSION['user']['id']) ? (int) $_SESSION['user']['id'] : null;
 
+    if ($vehicle_id > 0) {
+      $existingUserBooking = getActiveBookingByUserAndVehicle($pdo, $userId ?? 0, $vehicle_id);
+    }
+
     $targetVehicle = $vehicle_id ? getVehicle($pdo, $vehicle_id) : null;
 
     $basePricePerDay = $targetVehicle ? (float) ($targetVehicle['price_per_day'] ?? 0) : 0.0;
@@ -67,43 +80,104 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     }
     $totalAmount = $dailyRate * $durationDays;
 
-    if (!$vehicle_id || !$name || !$email || !$start_date || !$end_date) {
+    if (!$vehicle_id || !$start_date || !$end_date) {
         $message = 'Please fill all fields.';
+    } elseif (!$existingUserBooking && (!$name || !$email)) {
+      $message = 'Please fill all fields.';
     } elseif (!$startDateValid || !$endDateValid) {
       $message = 'Please provide valid booking dates.';
     } elseif (!$targetVehicle) {
         $message = 'Selected vehicle does not exist.';
-    } elseif (isVehicleBooked($targetVehicle)) {
-        $message = 'Sorry, this vehicle is already booked.';
-    } elseif (!in_array($selectedDriveMode, ['self_drive', 'with_driver'], true)) {
+    } elseif (!$existingUserBooking && !in_array($selectedDriveMode, ['self_drive', 'with_driver'], true)) {
       $message = 'Please choose a valid drive option.';
     } elseif ($startDateObj < $minimumBookingDate) {
       $message = 'Pickup date must be at least one day after today.';
     } elseif ($endDateObj < $startDateObj) {
         $message = 'Return date must be on or after the pickup date.';
+    } elseif (!$existingUserBooking && $booking_id > 0) {
+      $message = 'Unauthorized booking update request.';
+    } elseif ($existingUserBooking && $booking_id > 0 && $booking_id !== (int) $existingUserBooking['id']) {
+      $message = 'Invalid booking reference for reschedule request.';
+    } elseif ($existingUserBooking && $booking_id <= 0) {
+      $message = 'You already have an active booking for this vehicle. Update your booking dates below.';
+    } elseif ($existingUserBooking && $booking_id > 0 && !canCustomerCancelBooking((array) $existingUserBooking)) {
+      $message = 'You can change dates only within 24 hours from booking time.';
     } else {
 
+      if ($booking_id > 0 && $existingUserBooking) {
+        if (!isVehicleDateRangeAvailableExcludingBooking($pdo, $vehicle_id, $start_date, $end_date, $booking_id)) {
+          $message = 'These dates are already booked for this vehicle. Please choose different dates.';
+        } elseif (rescheduleCustomerBooking($pdo, $booking_id, $userId ?? 0, $start_date, $end_date)) {
+          $message = 'Booking dates updated successfully.';
+          $existingUserBooking = getActiveBookingByUserAndVehicle($pdo, $userId ?? 0, $vehicle_id);
+        } else {
+          $message = 'Unable to update booking dates. Please try again.';
+        }
+
+      } elseif (!isVehicleDateRangeAvailable($pdo, $vehicle_id, $start_date, $end_date)) {
+        $message = 'These dates are already booked for this vehicle. Please choose different dates.';
+
+      } else {
+
         if (createBooking(
-            $pdo,
-            $vehicle_id,
-            $userId,
-            $name,
-            $email,
-            $start_date,
-            $end_date,
-            $selectedDriveMode,
-            $dailyRate,
-            $totalAmount
+          $pdo,
+          $vehicle_id,
+          $userId,
+          $name,
+          $email,
+          $start_date,
+          $end_date,
+          $selectedDriveMode,
+          $dailyRate,
+          $totalAmount
         )) {
 
-            $message = 'Booking successful — ' . ucfirst(str_replace('_', ' ', $selectedDriveMode)) . ' at NPR ' . number_format($dailyRate, 0) . '/day.';
+          $message = 'Booking successful — ' . ucfirst(str_replace('_', ' ', $selectedDriveMode)) . ' at NPR ' . number_format($dailyRate, 0) . '/day.';
+          $existingUserBooking = getActiveBookingByUserAndVehicle($pdo, $userId ?? 0, $vehicle_id);
 
         } else {
 
-            $message = 'Sorry, this vehicle was just booked by someone else.';
+          $message = 'Sorry, these dates were just booked by another user. Please select different dates.';
+        }
         }
     }
 }
+
+  if (!$vehicle && !empty($_POST['vehicle_id'])) {
+    $vehicle = getVehicle($pdo, (int) $_POST['vehicle_id']);
+  }
+
+  $canEditExistingBooking = $existingUserBooking ? canCustomerCancelBooking((array) $existingUserBooking) : false;
+  $isRescheduleMode = $existingUserBooking !== null;
+  $formLockedForReschedule = $isRescheduleMode && !$canEditExistingBooking;
+  $dateOnlyRescheduleMode = $isRescheduleMode;
+  $startDateValue = $_POST['start_date'] ?? ($existingUserBooking['start_date'] ?? '');
+  $endDateValue = $_POST['end_date'] ?? ($existingUserBooking['end_date'] ?? '');
+
+  $blockedDateRanges = [];
+  $customerBookedRanges = [];
+  if ($vehicle) {
+    $allRanges = getVehicleBookedDateRangesDetailed($pdo, (int) $vehicle['id']);
+    foreach ($allRanges as $range) {
+      $isCurrentUser = (int) ($range['user_id'] ?? 0) === $currentUserId;
+      if ($isCurrentUser) {
+        $customerBookedRanges[] = [
+          'from' => $range['from'],
+          'to' => $range['to'],
+        ];
+      }
+
+      // Keep current booking selectable while rescheduling it.
+      if ($existingUserBooking && (int) $range['booking_id'] === (int) ($existingUserBooking['id'] ?? 0)) {
+        continue;
+      }
+
+      $blockedDateRanges[] = [
+        'from' => $range['from'],
+        'to' => $range['to'],
+      ];
+    }
+  }
 ?>
 
 <!doctype html>
@@ -117,6 +191,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 <title>Book Vehicle</title>
 
 <link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<style>
+  .flatpickr-day.customer-booked-date {
+    background: #dbeafe;
+    border-color: #60a5fa;
+    color: #1e3a8a;
+    font-weight: 600;
+  }
+</style>
 
 </head>
 
@@ -152,7 +235,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
 <?php endif; ?>
 
-<?php if (!$vehicle && empty($_POST['vehicle_id'])): ?>
+<?php if (!$vehicle): ?>
 
   <p>
     Vehicle not specified.
@@ -162,12 +245,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 <?php else: ?>
 
 <?php
-
-if (!$vehicle && !empty($_POST['vehicle_id'])) {
-
-    $vehicle = getVehicle($pdo, (int)$_POST['vehicle_id']);
-}
-
 /*
 |--------------------------------------------------------------------------
 | DIFFERENT IMAGE FOR DIFFERENT VEHICLES
@@ -246,14 +323,31 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
         Book your selected vehicle with flexible pickup options and clear pricing.
       </p>
 
-      <?php if (isVehicleBooked($vehicle)): ?>
-
-      <p class="message" style="background:#7f1d1d;color:#fee2e2;">
-        This vehicle is currently <strong>booked</strong> and unavailable.
-        Browse other cars on the <a href="index.php">home page</a>.
+      <p class="summary-description" style="margin-top:8px;">
+        Dates already booked by other users are disabled in the calendar.
       </p>
 
-      <?php else: ?>
+      <?php if ($isRescheduleMode): ?>
+        <p class="summary-description" style="margin-top:8px;">
+          Your current booking dates are highlighted in blue.
+          <?php if ($canEditExistingBooking): ?>
+            You can reschedule within 24 hours from when this booking was created.
+          <?php else: ?>
+            Rescheduling is closed. You can reschedule only within 24 hours from booking time.
+          <?php endif; ?>
+        </p>
+
+        <?php if (!empty($customerBookedRanges)): ?>
+          <div class="summary-description" style="margin-top:8px;">
+            <strong>Your booking range(s) (YYYY-MM-DD):</strong>
+            <?php foreach ($customerBookedRanges as $range): ?>
+              <div>
+                <?php echo htmlspecialchars((string) $range['from']); ?> to <?php echo htmlspecialchars((string) $range['to']); ?>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+      <?php endif; ?>
 
       <form method="post" action="book.php" class="booking-form">
 
@@ -264,6 +358,14 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
           name="vehicle_id"
           value="<?php echo htmlspecialchars($vehicle['id']); ?>"
         >
+
+        <?php if ($isRescheduleMode): ?>
+          <input
+            type="hidden"
+            name="booking_id"
+            value="<?php echo (int) $existingUserBooking['id']; ?>"
+          >
+        <?php endif; ?>
 
         <div class="form-group">
 
@@ -276,6 +378,7 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
             placeholder="Enter your name"
             required
             value="<?php echo htmlspecialchars($_SESSION['user']['name'] ?? ''); ?>"
+            <?php echo $dateOnlyRescheduleMode ? 'readonly' : ''; ?>
           >
 
         </div>
@@ -291,6 +394,7 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
             placeholder="you@example.com"
             required
             value="<?php echo htmlspecialchars($_SESSION['user']['email'] ?? ''); ?>"
+            <?php echo $dateOnlyRescheduleMode ? 'readonly' : ''; ?>
           >
 
         </div>
@@ -305,6 +409,7 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
             name="location"
             placeholder="City Center Terminal"
             value="City Center Terminal"
+            <?php echo $dateOnlyRescheduleMode ? 'readonly' : ''; ?>
           >
 
         </div>
@@ -313,10 +418,13 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
 
           <label for="drive_mode">Drive option</label>
 
-          <select id="drive_mode" name="drive_mode" required>
+          <select id="drive_mode" name="drive_mode" required <?php echo $dateOnlyRescheduleMode ? 'disabled' : ''; ?>>
             <option value="self_drive" <?php echo $selectedDriveMode === 'self_drive' ? 'selected' : ''; ?>>Self-drive</option>
             <option value="with_driver" <?php echo $selectedDriveMode === 'with_driver' ? 'selected' : ''; ?>>Requires driver (+NPR <?php echo htmlspecialchars(number_format($driverSurchargePerDay, 0)); ?>/day)</option>
           </select>
+          <?php if ($dateOnlyRescheduleMode): ?>
+            <input type="hidden" name="drive_mode" value="<?php echo htmlspecialchars($selectedDriveMode); ?>">
+          <?php endif; ?>
 
         </div>
 
@@ -330,7 +438,8 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
             name="start_date"
             min="<?php echo htmlspecialchars($minimumBookingDateValue); ?>"
             required
-            value="<?php echo htmlspecialchars($_POST['start_date'] ?? ''); ?>"
+            value="<?php echo htmlspecialchars($startDateValue); ?>"
+            <?php echo $formLockedForReschedule ? 'readonly' : ''; ?>
           >
 
         </div>
@@ -345,7 +454,8 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
             name="end_date"
             min="<?php echo htmlspecialchars($minimumBookingDateValue); ?>"
             required
-            value="<?php echo htmlspecialchars($_POST['end_date'] ?? ''); ?>"
+            value="<?php echo htmlspecialchars($endDateValue); ?>"
+            <?php echo $formLockedForReschedule ? 'readonly' : ''; ?>
           >
 
         </div>
@@ -368,13 +478,11 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
           <?php endif; ?>
         </p>
 
-        <button type="submit" class="btn btn-primary btn-large">
-          Continue to Book
+        <button type="submit" class="btn btn-primary btn-large" <?php echo $formLockedForReschedule ? 'disabled' : ''; ?>>
+          <?php echo $isRescheduleMode ? 'Update Booking Dates' : 'Continue to Book'; ?>
         </button>
 
       </form>
-
-      <?php endif; ?>
 
     </div>
 
@@ -420,6 +528,7 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
   </div>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
   (function () {
     const driveMode = document.getElementById('drive_mode');
@@ -428,6 +537,9 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
     const startDate = document.getElementById('start_date');
     const endDate = document.getElementById('end_date');
     const minimumBookingDate = <?php echo json_encode($minimumBookingDateValue, JSON_UNESCAPED_SLASHES); ?>;
+    const blockedDateRanges = <?php echo json_encode($blockedDateRanges, JSON_UNESCAPED_SLASHES); ?>;
+    const customerBookedRanges = <?php echo json_encode($customerBookedRanges, JSON_UNESCAPED_SLASHES); ?>;
+    const formLockedForReschedule = <?php echo $formLockedForReschedule ? 'true' : 'false'; ?>;
     if (!driveMode || !dailyRatePrice || !driveModeNote) {
       return;
     }
@@ -449,6 +561,36 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
     driveMode.addEventListener('change', render);
     render();
 
+    const hasOverlap = (startValue, endValue) => {
+      if (!startValue || !endValue) {
+        return false;
+      }
+      return blockedDateRanges.some((range) => startValue <= range.to && endValue >= range.from);
+    };
+
+    const isDateWithinRanges = (dateValue, ranges) => {
+      return ranges.some((range) => dateValue >= range.from && dateValue <= range.to);
+    };
+
+    const decorateCustomerBookedDates = (instance) => {
+      if (!instance || !instance.daysContainer) {
+        return;
+      }
+
+      instance.daysContainer
+        .querySelectorAll('.flatpickr-day')
+        .forEach((dayElem) => {
+          if (!dayElem.dateObj) {
+            return;
+          }
+          const dateValue = instance.formatDate(dayElem.dateObj, 'Y-m-d');
+          if (isDateWithinRanges(dateValue, customerBookedRanges)) {
+            dayElem.classList.add('customer-booked-date');
+            dayElem.title = 'Your existing booking date';
+          }
+        });
+    };
+
     const syncReturnDateConstraint = () => {
       if (!startDate || !endDate) {
         return;
@@ -466,14 +608,72 @@ $displayDailyRate = (float) ($vehicle['price_per_day'] ?? 0) + ($selectedDriveMo
 
       if (startDate.value && endDate.value && endDate.value < startDate.value) {
         endDate.setCustomValidity('Return date cannot be less than pickup date.');
+      } else if (hasOverlap(startDate.value, endDate.value)) {
+        endDate.setCustomValidity('Selected date range overlaps an existing booking.');
       } else {
         endDate.setCustomValidity('');
       }
     };
 
-    if (startDate && endDate) {
+    if (startDate && endDate && !formLockedForReschedule) {
+      if (typeof flatpickr !== 'undefined') {
+        let endPicker = null;
+
+        endPicker = flatpickr(endDate, {
+          dateFormat: 'Y-m-d',
+          minDate: minimumBookingDate,
+          disable: blockedDateRanges,
+          defaultDate: endDate.value || null,
+          onReady: function (_selectedDates, _dateStr, instance) {
+            decorateCustomerBookedDates(instance);
+          },
+          onMonthChange: function (_selectedDates, _dateStr, instance) {
+            decorateCustomerBookedDates(instance);
+          },
+          onYearChange: function (_selectedDates, _dateStr, instance) {
+            decorateCustomerBookedDates(instance);
+          },
+          onOpen: function () {
+            const minEndDate = startDate.value && startDate.value > minimumBookingDate
+              ? startDate.value
+              : minimumBookingDate;
+            endPicker.set('minDate', minEndDate);
+            decorateCustomerBookedDates(endPicker);
+          },
+          onChange: syncReturnDateConstraint,
+        });
+
+        flatpickr(startDate, {
+          dateFormat: 'Y-m-d',
+          minDate: minimumBookingDate,
+          disable: blockedDateRanges,
+          defaultDate: startDate.value || null,
+          onReady: function (_selectedDates, _dateStr, instance) {
+            decorateCustomerBookedDates(instance);
+          },
+          onMonthChange: function (_selectedDates, _dateStr, instance) {
+            decorateCustomerBookedDates(instance);
+          },
+          onYearChange: function (_selectedDates, _dateStr, instance) {
+            decorateCustomerBookedDates(instance);
+          },
+          onOpen: function (_selectedDates, _dateStr, instance) {
+            decorateCustomerBookedDates(instance);
+          },
+          onChange: function (selectedDates, dateStr) {
+            const minEndDate = dateStr && dateStr > minimumBookingDate
+              ? dateStr
+              : minimumBookingDate;
+            endPicker.set('minDate', minEndDate);
+            syncReturnDateConstraint();
+          },
+        });
+      }
+
       startDate.addEventListener('change', syncReturnDateConstraint);
       endDate.addEventListener('change', syncReturnDateConstraint);
+      syncReturnDateConstraint();
+    } else if (startDate && endDate) {
       syncReturnDateConstraint();
     }
   })();

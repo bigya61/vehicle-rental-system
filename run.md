@@ -189,7 +189,7 @@ No manual SQL import is required on a clean install.
 | name | VARCHAR(255) | Display name |
 | email | VARCHAR(255) UNIQUE | Login identifier |
 | password | VARCHAR(255) | bcrypt hash |
-| phone | VARCHAR(50) | Optional |
+| phone_number | VARCHAR(50) UNIQUE | Required |
 | role | ENUM('user','admin') | Default: `user` |
 | created_at | DATETIME | Auto-set |
 
