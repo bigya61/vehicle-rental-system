@@ -125,6 +125,38 @@ $vehicles = $query !== '' ? searchVehicles($pdo, $query) : [];
     </section>
   </main>
 
-  <footer class="page-footer">&copy; <?php echo date('Y'); ?> Vehicle Rental</footer>
+  <footer class="site-footer">
+    <div class="footer-top">
+      <div class="footer-brand">
+        <h2>Vehicle Rental System</h2>
+        <p>
+          Premium vehicles for every trip, booked in seconds
+          with transparent pricing, flexible pickup, and 24/7 support.
+        </p>
+        <div class="footer-social">
+          <a href="#" aria-label="Facebook">FB</a>
+          <a href="#" aria-label="Instagram">IG</a>
+          <a href="#" aria-label="Twitter">X</a>
+        </div>
+      </div>
+      <div class="footer-col">
+        <h4>Explore</h4>
+        <a href="index.php">Home</a>
+        <a href="index.php#fleet">Fleet</a>
+        <a href="my-bookings.php">My Bookings</a>
+        <a href="login.php">Login</a>
+      </div>
+      <div class="footer-col">
+        <h4>Support</h4>
+        <a href="mailto:support@vehiclerental.com">support@vehiclerental.com</a>
+        <a href="tel:+9779800000000">+977 980-0000000</a>
+        <span>Kathmandu, Nepal</span>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; <?php echo date('Y'); ?> Vehicle Rental System. All rights reserved.</span>
+      <span>Built for smooth booking and premium support.</span>
+    </div>
+  </footer>
 </body>
 </html>
