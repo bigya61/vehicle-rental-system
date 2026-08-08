@@ -1,0 +1,476 @@
+<?php
+require_once __DIR__ . '/functions.php';
+
+if (empty($_SESSION['admin']) || $_SESSION['admin'] !== true) {
+    $_SESSION['redirect_after_login'] = '../backend/admin-vehicles.php';
+    header('Location: ../frontend/login.php');
+    exit;
+}
+
+$flash = '';
+$error = '';
+$editVehicle = null;
+$imageUploadLimitLabel = formatBytesHuman(vehicleImageUploadLimitBytes());
+
+if (!empty($_SESSION['flash'])) {
+    $flash = $_SESSION['flash'];
+    unset($_SESSION['flash']);
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['delete_vehicle'])) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
+    $vehicleId = (int) $_POST['delete_vehicle'];
+    if ($vehicleId > 0) {
+        deleteVehicle($pdo, $vehicleId);
+        $_SESSION['flash'] = 'Vehicle deleted successfully.';
+    }
+    header('Location: admin-vehicles.php');
+    exit;
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['restore_vehicle'])) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
+    $vehicleId = (int) $_POST['restore_vehicle'];
+    if ($vehicleId > 0) {
+        restoreVehicle($pdo, $vehicleId);
+        $_SESSION['flash'] = 'Vehicle restored successfully.';
+    }
+    header('Location: admin-vehicles.php?view=deleted');
+    exit;
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['release_vehicle'])) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
+
+    $vehicleId = (int) $_POST['release_vehicle'];
+    if ($vehicleId > 0 && adminReleaseVehicle($pdo, $vehicleId)) {
+        $_SESSION['flash'] = 'Vehicle set to available and active bookings cancelled.';
+    } else {
+        $_SESSION['flash'] = 'Unable to set vehicle to available.';
+    }
+
+    header('Location: admin-vehicles.php');
+    exit;
+}
+
+if (isset($_GET['edit'])) {
+    $editVehicle = getVehicle($pdo, (int) $_GET['edit']);
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['save_vehicle'])) {
+    if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(400);
+        exit('Invalid CSRF token.');
+    }
+    $vehicleId = (int) ($_POST['vehicle_id'] ?? 0);
+    $make = trim($_POST['make'] ?? '');
+    $model = trim($_POST['model'] ?? '');
+    $year = trim($_POST['year'] ?? '');
+    $transmission = normalizeTransmission($_POST['transmission'] ?? 'automatic');
+    $price = trim($_POST['price_per_day'] ?? '');
+    $image = normalizeVehicleImagePath($_POST['image'] ?? '');
+    $description = trim($_POST['description'] ?? '');
+    $uploadError = $_FILES['image_file']['error'] ?? UPLOAD_ERR_NO_FILE;
+    $uploadAttempted = $uploadError !== UPLOAD_ERR_NO_FILE;
+    $uploadFailureReason = null;
+    $image = handleVehicleImageUpload($_FILES['image_file'] ?? null, $image, $uploadFailureReason);
+
+    if ($make === '' || $model === '' || $price === '') {
+        $error = 'make, model, and price are required.';
+    } elseif (!in_array($transmission, ['manual', 'automatic'], true)) {
+        $error = 'Transmission must be manual or automatic.';
+    } elseif ($uploadAttempted && $image === '') {
+        $specificReason = trim((string) ($uploadFailureReason ?? ''));
+        if ($specificReason !== '') {
+            $error = 'Image upload failed: ' . $specificReason;
+        } elseif ($uploadError !== UPLOAD_ERR_OK) {
+            $error = 'Image upload failed: ' . phpUploadErrorMessage((int) $uploadError);
+        } else {
+            $error = 'Image upload failed. Allowed types: JPG, JPEG, PNG, WEBP, SVG, GIF. Max file size: ' . $imageUploadLimitLabel . '.';
+        }
+    } elseif (!is_numeric($price) || (float) $price < 0) {
+        $error = 'Price must be a valid number.';
+    } elseif (!isValidVehicleImageReference($image)) {
+        $error = 'Image must be a direct image URL or a valid image path ending in jpg, jpeg, png, webp, svg, or gif.';
+    } else {
+        if ($vehicleId > 0) {
+            updateVehicle($pdo, $vehicleId, $make, $model, $year ?: null, $transmission, $price, $image, $description ?: null);
+            $_SESSION['flash'] = 'Vehicle updated successfully.';
+        } else {
+            $ownerId = !empty($_SESSION['user']['id'])
+                ? (int) $_SESSION['user']['id']
+                : (int) ($pdo->query("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+            createVehicle($pdo, $ownerId, $make, $model, $year ?: null, $transmission, $price, $image, $description ?: null);
+            $_SESSION['flash'] = 'Vehicle added successfully.';
+        }
+        header('Location: admin-vehicles.php');
+        exit;
+    }
+}
+
+$view = ($_GET['view'] ?? 'active') === 'deleted' ? 'deleted' : 'active';
+$activeVehicles = getVehicles($pdo);
+$deletedVehicles = getDeletedVehicles($pdo);
+$vehicles = $view === 'deleted' ? $deletedVehicles : $activeVehicles;
+?>
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Manage Vehicles - Vehicle Rental</title>
+  <link rel="stylesheet" href="../frontend/css/styles.css">
+  <style>
+    body { margin:0; font-family:Arial,Helvetica,sans-serif; background:#071126; color:#e5e7eb; }
+    .admin-header { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:20px 40px; background:#111827; border-bottom:1px solid #1f2937; }
+    .admin-header h1 { margin:0; font-size:28px; }
+    .admin-header nav a { color:#9ca3af; text-decoration:none; margin-left:20px; font-weight:700; padding-bottom:4px; border-bottom:2px solid transparent; }
+    .admin-header nav a:hover { color:#f59e0b; }
+    .admin-header nav a.active { color:#f59e0b; border-bottom-color:#f59e0b; }
+    .dashboard { padding:30px 40px; }
+    .message, .error { max-width:1100px; margin:0 auto 20px; padding:16px 20px; border-radius:12px; }
+    .message { background:#134e4a; color:#d1fae5; }
+    .error { background:#7f1d1d; color:#fee2e2; }
+    .vehicle-form, .table-container { max-width:1100px; margin:0 auto 30px; background:#111827; border-radius:12px; border:1px solid #1f2937; overflow:hidden; }
+    .form-header, .table-header { padding:24px 30px 0; }
+    .form-header h2, .table-header h2 { margin:0; }
+    .form-body { padding:24px 30px; display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .form-group label { display:block; margin-bottom:8px; color:#9ca3af; }
+    .form-group input, .form-group select, .form-group textarea { width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #334155; border-radius:8px; background:#0f172a; color:#e2e8f0; }
+    .image-dropzone { position:relative; border:2px dashed #475569; border-radius:12px; padding:20px; background:#0f172a; cursor:pointer; text-align:center; transition:border-color .2s ease, transform .2s ease; overflow:hidden; }
+    .image-dropzone.is-dragover { border-color:#f59e0b; transform:translateY(-1px); }
+    .image-dropzone p { margin:6px 0; color:#cbd5e1; }
+    .dropzone-hint { font-size:13px; color:#94a3b8; }
+    .image-dropzone-preview { margin-top:12px; display:flex; justify-content:center; }
+    .image-dropzone-preview img { max-height:160px; max-width:100%; border-radius:8px; object-fit:cover; }
+    .image-dropzone-input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+    .helper-text { display:block; margin-top:8px; color:#94a3b8; font-size:13px; }
+    .form-actions { padding:0 30px 30px; display:flex; gap:12px; }
+    .btn { display:inline-block; padding:12px 20px; border-radius:8px; text-decoration:none; font-weight:700; border:none; cursor:pointer; }
+    .btn-primary { background:#f59e0b; color:#111827; }
+    .btn-secondary { background:#0f172a; color:#f8fafc; border:1px solid #334155; }
+    .status-tabs { display:flex; gap:8px; padding:0 30px; margin-top:16px; }
+    .status-tabs a { color:#9ca3af; text-decoration:none; padding:8px 16px; border-radius:999px; border:1px solid #1f2937; font-size:13px; font-weight:700; }
+    .status-tabs a.active { background:#f59e0b; color:#111827; border-color:#f59e0b; }
+    .status-tabs a:hover:not(.active) { border-color:#475569; color:#e2e8f0; }
+    .table-scroll { overflow-x:auto; margin-top:20px; }
+    table { width:100%; border-collapse:collapse; min-width:860px; }
+    thead { background:#1f2937; }
+    th, td { padding:14px 18px; text-align:left; border-bottom:1px solid #1f2937; }
+    th { color:#fbbf24; font-size:13px; letter-spacing:.02em; text-transform:uppercase; }
+    td { color:#cbd5e1; }
+    .empty { padding:24px 30px; color:#9ca3af; }
+    .action-link { color:#f59e0b; text-decoration:none; margin-right:12px; }
+    .delete-link { color:#f87171; }
+    .page-footer { padding:20px 40px; text-align:center; color:#9ca3af; }
+    @media(max-width:900px) {
+      .admin-header { flex-direction:column; align-items:flex-start; }
+      .admin-header nav a { margin:0 16px 0 0; }
+      .dashboard { padding:24px 16px; }
+      .form-body { grid-template-columns:1fr; }
+      .form-group-wide { grid-column:auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="admin-header">
+    <h1>Manage Vehicles</h1>
+    <nav>
+      <a href="admin.php">Dashboard</a>
+      <a href="admin-vehicles.php" class="active">Vehicles</a>
+      <a href="admin-bookings.php">Bookings</a>
+      <a href="../frontend/index.php">Home</a>
+      <a href="../frontend/logout.php">Logout</a>
+    </nav>
+  </header>
+
+  <main class="dashboard">
+    <?php if ($flash): ?>
+      <div class="message"><?php echo htmlspecialchars($flash); ?></div>
+    <?php endif; ?>
+
+    <?php if ($error): ?>
+      <div class="error"><?php echo htmlspecialchars($error); ?></div>
+    <?php endif; ?>
+
+    <section class="vehicle-form">
+      <div class="form-header">
+        <h2><?php echo $editVehicle ? 'Edit Vehicle' : 'Add New Vehicle'; ?></h2>
+      </div>
+      <form method="post" action="admin-vehicles.php" enctype="multipart/form-data">
+        <?php echo csrfField(); ?>
+        <div class="form-body">
+          <div class="form-group">
+            <label for="make">Make</label>
+            <input id="make" name="make" value="<?php echo htmlspecialchars($editVehicle['make'] ?? ''); ?>" required>
+          </div>
+          <div class="form-group">
+            <label for="model">Model</label>
+            <input id="model" name="model" value="<?php echo htmlspecialchars($editVehicle['model'] ?? ''); ?>" required>
+          </div>
+          <div class="form-group">
+            <label for="year">Year</label>
+            <input id="year" name="year" type="number" min="1900" max="2100" value="<?php echo htmlspecialchars($editVehicle['year'] ?? ''); ?>">
+          </div>
+          <div class="form-group">
+            <label for="transmission">Transmission</label>
+            <?php $selectedTransmission = normalizeTransmission($editVehicle['transmission'] ?? 'automatic'); ?>
+            <select id="transmission" name="transmission">
+              <option value="automatic" <?php echo $selectedTransmission === 'automatic' ? 'selected' : ''; ?>>Automatic</option>
+              <option value="manual" <?php echo $selectedTransmission === 'manual' ? 'selected' : ''; ?>>Manual</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="price_per_day">Price per day</label>
+            <input id="price_per_day" name="price_per_day" type="number" step="0.01" min="0" value="<?php echo htmlspecialchars($editVehicle['price_per_day'] ?? ''); ?>" required>
+          </div>
+          <div class="form-group form-group-wide" style="grid-column:span 2;">
+            <label for="image_file">Vehicle image</label>
+            <div id="image-dropzone" class="image-dropzone">
+              <input id="image_file" name="image_file" type="file" accept="image/*" class="image-dropzone-input" aria-label="Upload vehicle image">
+              <p><strong>Drop an image here</strong> or click to browse</p>
+              <p class="dropzone-hint">PNG, JPG, WEBP, SVG, or GIF up to <?php echo htmlspecialchars($imageUploadLimitLabel); ?></p>
+              <p id="image-dropzone-status" class="dropzone-hint" style="display:none;"></p>
+              <div id="image-dropzone-preview" class="image-dropzone-preview"></div>
+            </div>
+            <small class="helper-text">You can also type a path manually if you already have an image. Uploading a file overrides the text path.</small>
+          </div>
+          <div class="form-group form-group-wide" style="grid-column:span 2;">
+            <label for="image">Image path</label>
+            <input id="image" name="image" value="<?php echo htmlspecialchars(normalizeVehicleImagePath($editVehicle['image'] ?? '')); ?>" placeholder="/frontend/images/toyota.jpg or https://example.com/car.jpg">
+          </div>
+          <div class="form-group form-group-wide" style="grid-column:span 2;">
+            <label for="description">Details</label>
+            <textarea id="description" name="description" rows="3" placeholder="Seats, transmission, mileage, condition, etc."><?php echo htmlspecialchars($editVehicle['description'] ?? ''); ?></textarea>
+          </div>
+        </div>
+        <div class="form-actions">
+          <?php if ($editVehicle): ?>
+            <input type="hidden" name="vehicle_id" value="<?php echo (int) $editVehicle['id']; ?>">
+          <?php endif; ?>
+          <button type="submit" name="save_vehicle" class="btn btn-primary"><?php echo $editVehicle ? 'Save changes' : 'Add vehicle'; ?></button>
+          <?php if ($editVehicle): ?>
+            <a href="admin-vehicles.php" class="btn btn-secondary">Cancel</a>
+          <?php endif; ?>
+        </div>
+      </form>
+    </section>
+
+    <section class="table-container">
+      <div class="table-header">
+        <h2>Vehicle Inventory</h2>
+      </div>
+      <div class="status-tabs">
+        <a href="admin-vehicles.php?view=active" class="<?php echo $view === 'active' ? 'active' : ''; ?>">Active (<?php echo count($activeVehicles); ?>)</a>
+        <a href="admin-vehicles.php?view=deleted" class="<?php echo $view === 'deleted' ? 'active' : ''; ?>">Deleted (<?php echo count($deletedVehicles); ?>)</a>
+      </div>
+      <?php if (empty($vehicles)): ?>
+        <div class="empty"><?php echo $view === 'deleted' ? 'No deleted vehicles.' : 'No vehicles available. Add a vehicle above.'; ?></div>
+      <?php else: ?>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Make</th>
+                <th>Model</th>
+                <th>Year</th>
+                <th>Owner</th>
+                <th>Price / day</th>
+                <th>Status</th>
+                <th>Image path</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($vehicles as $vehicle): ?>
+                <tr>
+                  <td><?php echo (int) $vehicle['id']; ?></td>
+                  <td><?php echo htmlspecialchars($vehicle['make']); ?></td>
+                  <td><?php echo htmlspecialchars($vehicle['model']); ?></td>
+                  <td><?php echo htmlspecialchars($vehicle['year']); ?></td>
+                  <td><?php echo htmlspecialchars($vehicle['owner_name'] ?? '—'); ?></td>
+                  <td><?php echo htmlspecialchars($vehicle['price_per_day']); ?></td>
+                  <td>
+                    <?php if (isVehicleBooked($vehicle)): ?>
+                      <span style="color:#f87171;font-weight:700;">Booked</span>
+                    <?php else: ?>
+                      <span style="color:#34d399;font-weight:700;">Available</span>
+                    <?php endif; ?>
+                  </td>
+                  <td><?php echo htmlspecialchars($vehicle['image']); ?></td>
+                  <td>
+                    <?php if ($view === 'deleted'): ?>
+                      <form method="post" action="admin-vehicles.php" style="display:inline;" onsubmit="return confirm('Restore this vehicle to the active fleet?');">
+                        <?php echo csrfField(); ?>
+                        <input type="hidden" name="restore_vehicle" value="<?php echo (int) $vehicle['id']; ?>">
+                        <button type="submit" class="action-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;color:#34d399;">Restore</button>
+                      </form>
+                    <?php else: ?>
+                      <a class="action-link" href="admin-vehicles.php?edit=<?php echo (int) $vehicle['id']; ?>">Edit</a>
+                      <?php if (isVehicleBooked($vehicle)): ?>
+                        <form method="post" action="admin-vehicles.php" style="display:inline;" onsubmit="return confirm('Set this vehicle to available and cancel its active bookings?');">
+                          <?php echo csrfField(); ?>
+                          <input type="hidden" name="release_vehicle" value="<?php echo (int) $vehicle['id']; ?>">
+                          <button type="submit" class="action-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;color:#34d399;">Set available</button>
+                        </form>
+                      <?php endif; ?>
+                      <form method="post" action="admin-vehicles.php" style="display:inline;" onsubmit="return confirm('Delete this vehicle? It will be hidden from listings but its booking history is kept.');">
+                        <?php echo csrfField(); ?>
+                        <input type="hidden" name="delete_vehicle" value="<?php echo (int) $vehicle['id']; ?>">
+                        <button type="submit" class="action-link delete-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;">Delete</button>
+                      </form>
+                    <?php endif; ?>
+                  </td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+    </section>
+  </main>
+
+  <footer class="page-footer">&copy; <?php echo date('Y'); ?> Vehicle Rental</footer>
+  <script>
+    (function () {
+      const maxUploadBytes = <?php echo (int) vehicleImageUploadLimitBytes(); ?>;
+      const maxUploadLabel = <?php echo json_encode($imageUploadLimitLabel, JSON_UNESCAPED_SLASHES); ?>;
+      const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'svg', 'gif'];
+
+      const dropzone = document.getElementById('image-dropzone');
+      const fileInput = document.getElementById('image_file');
+      const preview = document.getElementById('image-dropzone-preview');
+      const pathInput = document.getElementById('image');
+
+      if (!dropzone || !fileInput || !preview || !pathInput) {
+        return;
+      }
+
+      const status = document.getElementById('image-dropzone-status');
+
+      const setStatus = (text, isError = false) => {
+        if (!status) {
+          return;
+        }
+        status.textContent = text;
+        status.style.display = text ? '' : 'none';
+        status.style.color = isError ? '#fca5a5' : '';
+      };
+
+      const validateFile = (file) => {
+        if (!file) {
+          return { ok: false, message: 'No file selected.' };
+        }
+
+        const extension = file.name.includes('.')
+          ? file.name.split('.').pop().toLowerCase()
+          : '';
+
+        if (!allowedExtensions.includes(extension)) {
+          return {
+            ok: false,
+            message: 'Unsupported file type .' + (extension || 'unknown') + '. Allowed: JPG, JPEG, PNG, WEBP, SVG, GIF.'
+          };
+        }
+
+        if (maxUploadBytes > 0 && file.size > maxUploadBytes) {
+          return {
+            ok: false,
+            message: 'File is too large (' + Math.ceil(file.size / 1024) + ' KB). Max allowed is ' + maxUploadLabel + '.'
+          };
+        }
+
+        return { ok: true, message: '' };
+      };
+
+      const showSelectedFile = (file) => {
+        preview.innerHTML = '';
+        if (!file) {
+          setStatus('');
+          return;
+        }
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        img.alt = file.name;
+        preview.appendChild(img);
+        setStatus('✓ ' + file.name);
+      };
+
+      ['dragenter', 'dragover'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.add('is-dragover');
+        });
+      });
+
+      ['dragleave', 'dragend', 'drop'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.remove('is-dragover');
+
+          if (eventName === 'drop') {
+            const droppedFiles = event.dataTransfer?.files;
+            if (droppedFiles && droppedFiles.length > 0) {
+              let assigned = false;
+
+              try {
+                fileInput.files = droppedFiles;
+                assigned = fileInput.files && fileInput.files.length > 0;
+              } catch (_) {
+                assigned = false;
+              }
+
+              if (!assigned && typeof DataTransfer !== 'undefined') {
+                try {
+                  const transfer = new DataTransfer();
+                  transfer.items.add(droppedFiles[0]);
+                  fileInput.files = transfer.files;
+                  assigned = fileInput.files && fileInput.files.length > 0;
+                } catch (_) {
+                  assigned = false;
+                }
+              }
+
+              showSelectedFile(droppedFiles[0]);
+
+              if (!assigned) {
+                setStatus('Image preview loaded, but browser blocked attaching file input. Click and reselect to upload.', true);
+                return;
+              }
+
+              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }
+        });
+      });
+
+      fileInput.addEventListener('change', (event) => {
+        const file = event.target.files?.[0] || null;
+        const check = validateFile(file);
+        if (!check.ok) {
+          preview.innerHTML = '';
+          setStatus(check.message, true);
+          event.target.value = '';
+          return;
+        }
+        showSelectedFile(file);
+      });
+
+      fileInput.addEventListener('drop', () => {
+        setTimeout(() => showSelectedFile(fileInput.files?.[0] || null), 0);
+      });
+    })();
+  </script>
+</body>
+</html>

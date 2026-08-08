@@ -47,6 +47,18 @@ function uniqueIndexExistsForColumn(PDO $pdo, string $table, string $column): bo
     return (int) $stmt->fetchColumn() > 0;
 }
 
+function columnEnumHasValue(PDO $pdo, string $table, string $column, string $value): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT COLUMN_TYPE
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+    );
+    $stmt->execute([$table, $column]);
+    $columnType = (string) $stmt->fetchColumn();
+    return $columnType !== '' && str_contains($columnType, "'" . $value . "'");
+}
+
 function ensureDatabaseSchema(PDO $pdo): void
 {
     if (!tableExists($pdo, 'users')) {
@@ -96,6 +108,7 @@ function ensureDatabaseSchema(PDO $pdo): void
                 image VARCHAR(255) DEFAULT NULL,
                 description TEXT DEFAULT NULL,
                 status ENUM('available', 'booked') NOT NULL DEFAULT 'available',
+                is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
@@ -117,6 +130,9 @@ function ensureDatabaseSchema(PDO $pdo): void
         }
         if (!columnExists($pdo, 'vehicles', 'created_at')) {
             $pdo->exec('ALTER TABLE vehicles ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+        }
+        if (!columnExists($pdo, 'vehicles', 'is_deleted')) {
+            $pdo->exec('ALTER TABLE vehicles ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0');
         }
 
         $pdo->exec("UPDATE vehicles SET transmission = 'automatic' WHERE transmission IS NULL OR transmission NOT IN ('manual', 'automatic')");
@@ -144,7 +160,9 @@ function ensureDatabaseSchema(PDO $pdo): void
             $pdo->exec('ALTER TABLE bookings ADD COLUMN user_id INT DEFAULT NULL AFTER vehicle_id');
         }
         if (!columnExists($pdo, 'bookings', 'status')) {
-            $pdo->exec("ALTER TABLE bookings ADD COLUMN status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active'");
+            $pdo->exec("ALTER TABLE bookings ADD COLUMN status ENUM('active', 'completed', 'cancelled') NOT NULL DEFAULT 'active'");
+        } elseif (!columnEnumHasValue($pdo, 'bookings', 'status', 'completed')) {
+            $pdo->exec("ALTER TABLE bookings MODIFY COLUMN status ENUM('active', 'completed', 'cancelled') NOT NULL DEFAULT 'active'");
         }
         if (!columnExists($pdo, 'bookings', 'drive_mode')) {
             $pdo->exec("ALTER TABLE bookings ADD COLUMN drive_mode ENUM('self_drive', 'with_driver') NOT NULL DEFAULT 'self_drive' AFTER end_date");

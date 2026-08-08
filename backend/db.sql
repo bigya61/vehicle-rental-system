@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   image VARCHAR(255) DEFAULT NULL,
   description TEXT DEFAULT NULL,
   status ENUM('available', 'booked') NOT NULL DEFAULT 'available',
+  is_deleted TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -38,7 +39,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   drive_mode ENUM('self_drive', 'with_driver') NOT NULL DEFAULT 'self_drive',
   daily_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-  status ENUM('active', 'cancelled') NOT NULL DEFAULT 'active',
+  status ENUM('active', 'completed', 'cancelled') NOT NULL DEFAULT 'active',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL

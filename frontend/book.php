@@ -10,9 +10,14 @@ if (empty($_SESSION['user']['id'])) {
 }
 
 $vehicle = null;
+$vehicleUnavailable = false;
 
 if (!empty($_GET['vehicle_id'])) {
     $vehicle = getVehicle($pdo, (int)$_GET['vehicle_id']);
+    if ($vehicle && !empty($vehicle['is_deleted'])) {
+        $vehicle = null;
+        $vehicleUnavailable = true;
+    }
 }
 
 $message = '';
@@ -86,7 +91,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
       $message = 'Please fill all fields.';
     } elseif (!$startDateValid || !$endDateValid) {
       $message = 'Please provide valid booking dates.';
-    } elseif (!$targetVehicle) {
+    } elseif (!$targetVehicle || !empty($targetVehicle['is_deleted'])) {
         $message = 'Selected vehicle does not exist.';
     } elseif (!$existingUserBooking && !in_array($selectedDriveMode, ['self_drive', 'with_driver'], true)) {
       $message = 'Please choose a valid drive option.';
@@ -145,6 +150,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
   if (!$vehicle && !empty($_POST['vehicle_id'])) {
     $vehicle = getVehicle($pdo, (int) $_POST['vehicle_id']);
+    if ($vehicle && !empty($vehicle['is_deleted'])) {
+        $vehicle = null;
+        $vehicleUnavailable = true;
+    }
   }
 
   $canEditExistingBooking = $existingUserBooking ? canCustomerCancelBooking((array) $existingUserBooking) : false;
@@ -238,7 +247,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 <?php if (!$vehicle): ?>
 
   <p>
-    Vehicle not specified.
+    <?php echo $vehicleUnavailable ? 'This vehicle is no longer available.' : 'Vehicle not specified.'; ?>
     Go back to <a href="index.php">listing</a>.
   </p>
 

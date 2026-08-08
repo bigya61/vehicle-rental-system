@@ -88,7 +88,7 @@ $vehicles = $query !== '' ? searchVehicles($pdo, $query) : [];
                 >
 
                 <?php if (isVehicleBooked($v)): ?>
-                  <span class="vehicle-tag" style="left:auto;right:12px;background:#d97706;color:#fff;">Some dates unavailable</span>
+                  <span class="vehicle-tag" style="left:auto;right:12px;background:#d97706;color:#fff;">Some Dates Unavailable</span>
                 <?php endif; ?>
               </div>
 

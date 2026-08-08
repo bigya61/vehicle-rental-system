@@ -416,7 +416,12 @@ function handleVehicleImageUpload(?array $file, ?string $existingImage = null, ?
 }
 
 function getVehicles(PDO $pdo) {
-    $stmt = $pdo->query('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id ORDER BY v.id');
+    $stmt = $pdo->query('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id WHERE v.is_deleted = 0 ORDER BY v.id');
+    return $stmt->fetchAll();
+}
+
+function getDeletedVehicles(PDO $pdo) {
+    $stmt = $pdo->query('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id WHERE v.is_deleted = 1 ORDER BY v.id');
     return $stmt->fetchAll();
 }
 
@@ -432,7 +437,8 @@ function searchVehicles(PDO $pdo, string $query) {
         'SELECT v.*, u.name AS owner_name, u.email AS owner_email
          FROM vehicles v
          LEFT JOIN users u ON v.owner_id = u.id
-         WHERE LOWER(TRIM(CONCAT(COALESCE(v.make, \'\'), \' \', COALESCE(v.model, \'\')))) LIKE :term
+         WHERE v.is_deleted = 0
+           AND LOWER(TRIM(CONCAT(COALESCE(v.make, \'\'), \' \', COALESCE(v.model, \'\')))) LIKE :term
          ORDER BY v.id'
     );
     $stmt->execute(['term' => $searchTerm]);
@@ -446,9 +452,14 @@ function getVehicle(PDO $pdo, $id) {
 }
 
 function getVehiclesByOwner(PDO $pdo, $owner_id) {
-    $stmt = $pdo->prepare('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id WHERE v.owner_id = ? ORDER BY v.id DESC');
+    $stmt = $pdo->prepare('SELECT v.*, u.name AS owner_name, u.email AS owner_email FROM vehicles v LEFT JOIN users u ON v.owner_id = u.id WHERE v.owner_id = ? AND v.is_deleted = 0 ORDER BY v.id DESC');
     $stmt->execute([$owner_id]);
     return $stmt->fetchAll();
+}
+
+function restoreVehicle(PDO $pdo, $id) {
+    $stmt = $pdo->prepare('UPDATE vehicles SET is_deleted = 0 WHERE id = ?');
+    return $stmt->execute([$id]);
 }
 
 /**
@@ -521,6 +532,27 @@ function setVehicleStatus(PDO $pdo, $id, $status) {
 
 function isVehicleBooked(array $vehicle): bool {
     return ($vehicle['status'] ?? 'available') === 'booked';
+}
+
+/**
+ * Returns a booking's effective status: the stored value when it's already
+ * 'completed' or 'cancelled', otherwise falls back to a date comparison for
+ * 'active' rows in case markBookingsCompleted() hasn't synced them yet
+ * within the current request.
+ */
+function bookingEffectiveStatus(array $booking, ?DateTimeImmutable $today = null): string {
+    $rawStatus = strtolower((string) ($booking['status'] ?? 'active'));
+    if ($rawStatus === 'cancelled' || $rawStatus === 'completed') {
+        return $rawStatus;
+    }
+
+    $endDate = DateTimeImmutable::createFromFormat('Y-m-d', (string) ($booking['end_date'] ?? ''));
+    $todayRef = $today ?? new DateTimeImmutable('today');
+    if ($endDate && $endDate->setTime(0, 0, 0) < $todayRef) {
+        return 'completed';
+    }
+
+    return 'active';
 }
 
 /**
@@ -626,7 +658,7 @@ function isVehicleDateRangeAvailableExcludingBooking(PDO $pdo, int $vehicleId, s
 }
 
 function deleteVehicle(PDO $pdo, $id) {
-    $stmt = $pdo->prepare('DELETE FROM vehicles WHERE id = ?');
+    $stmt = $pdo->prepare('UPDATE vehicles SET is_deleted = 1 WHERE id = ?');
     return $stmt->execute([$id]);
 }
 
@@ -662,12 +694,22 @@ function authenticateUser(PDO $pdo, $email, $password) {
 }
 
 /**
+ * Flips expired active bookings to 'completed' so the database reflects
+ * their true lifecycle state instead of leaving them 'active' forever.
+ */
+function markBookingsCompleted(PDO $pdo): void {
+    $pdo->exec("UPDATE bookings SET status = 'completed' WHERE status = 'active' AND end_date < CURDATE()");
+}
+
+/**
  * Keeps vehicle availability aligned with booking dates.
  * A vehicle stays booked while it has at least one active booking whose
  * end_date is today or in the future. Once the booking expires, the vehicle
  * becomes available automatically.
  */
 function syncVehicleAvailability(PDO $pdo): void {
+    markBookingsCompleted($pdo);
+
     $pdo->exec(
         "UPDATE vehicles v
         LEFT JOIN (
@@ -694,10 +736,10 @@ function createBooking(PDO $pdo, $vehicle_id, $user_id, $name, $email, $start_da
     try {
         $pdo->beginTransaction();
 
-        $lock = $pdo->prepare('SELECT status, price_per_day FROM vehicles WHERE id = ? FOR UPDATE');
+        $lock = $pdo->prepare('SELECT status, price_per_day, is_deleted FROM vehicles WHERE id = ? FOR UPDATE');
         $lock->execute([$vehicle_id]);
         $vehicle = $lock->fetch();
-        if (!$vehicle) {
+        if (!$vehicle || !empty($vehicle['is_deleted'])) {
             $pdo->rollBack();
             return false;
         }
@@ -759,7 +801,7 @@ function cancelBooking(PDO $pdo, $booking_id) {
         $stmt->execute([$booking_id]);
         $booking = $stmt->fetch();
 
-        if (!$booking || $booking['status'] === 'cancelled') {
+        if (!$booking || in_array($booking['status'], ['cancelled', 'completed'], true)) {
             $pdo->rollBack();
             return false;
         }
@@ -892,8 +934,15 @@ function canCustomerCancelBooking(array $booking, ?DateTimeImmutable $now = null
 }
 
 function getBookings(PDO $pdo) {
-    $stmt = $pdo->query('SELECT b.*, v.make, v.model, u.name AS user_name, u.email AS user_email, u.phone_number AS user_phone_number FROM bookings b JOIN vehicles v ON b.vehicle_id = v.id LEFT JOIN users u ON b.user_id = u.id ORDER BY b.created_at DESC');
+    $stmt = $pdo->query('SELECT b.*, v.make, v.model, v.is_deleted AS vehicle_deleted, u.name AS user_name, u.email AS user_email, u.phone_number AS user_phone_number FROM bookings b JOIN vehicles v ON b.vehicle_id = v.id LEFT JOIN users u ON b.user_id = u.id ORDER BY b.created_at DESC');
     return $stmt->fetchAll();
+}
+
+function getBookingById(PDO $pdo, int $id): ?array {
+    $stmt = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
+    $stmt->execute([$id]);
+    $booking = $stmt->fetch();
+    return $booking ?: null;
 }
 
 function getBookingsByUser(PDO $pdo, int $user_id) {
