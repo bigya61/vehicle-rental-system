@@ -1,2 +1,6 @@
 backend/assets
-run.md
+*.md
+*.json
+*.pdf
+*.docx
+graphify-out/
